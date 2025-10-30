@@ -58,7 +58,6 @@ http://localhost:5000
 /requirements.txt # Python package requirements
 /README.md # This documentation
 
-text
 
 ## Contributing
 
@@ -73,4 +72,5 @@ This project is licensed under the MIT License.
 Thanks to the entire team for collaboration and the open-source community for supporting tools.
 
 ---
+
 
