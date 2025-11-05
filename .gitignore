@@ -1,0 +1,24 @@
+# Ignore virtual environment
+venv/
+.venv/
+
+# Ignore Python cache
+__pycache__/
+*.pyc
+
+# --- CRITICAL ---
+# Ignore all data, uploads, results, and database files
+# These will be stored on a "Persistent Disk" on the server, not in your code.
+db/
+uploads/
+results/
+*.db
+*.db-journal
+
+# Ignore IDE/editor files
+.idea/
+.vscode/
+
+# Ignore OS-specific files
+.DS_Store
+Thumbs.db
