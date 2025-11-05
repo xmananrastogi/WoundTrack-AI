@@ -1,453 +1,760 @@
 #!/usr/bin/env python3
-"""
-Complete Flask Server - WITH FILTER BUTTONS & TOOLTIPS
-"""
+import matplotlib
 
-from flask import Flask, render_template_string, request, jsonify
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+from flask import Flask, render_template, request, jsonify, send_file, send_from_directory, abort
 from flask_cors import CORS
-import os
-import glob
-import json
-import subprocess
-import threading
-import base64
-import pandas as pd
+import os, glob, json, subprocess, threading, base64, pandas as pd, cv2, numpy as np, posixpath, shutil
+from scipy import stats
+import io, zipfile, uuid, logging
+from PIL import Image, ImageSequence
+from reportlab.lib.pagesizes import letter
+from reportlab.platypus import SimpleDocTemplate, Table, Paragraph, Spacer, Image as RLImage, PageBreak
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.units import inch
+from reportlab.lib import colors
+from werkzeug.utils import secure_filename
+
+# NEW: Import Plotly for backend plot generation
+import plotly.graph_objects as go
+import plotly.express as px
+import plotly.io as pio
+
+from config import Config
+import database  # --- Import database module ---
+from typing import List, Dict, Optional
+
+# Setup logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
-app.config['SECRET_KEY'] = 'wound-healing-key'
+app.config.from_object(Config)
 CORS(app)
 
-analysis_state = {'running': False, 'progress': 0, 'status': ''}
+# Ensure results dir exists (upload dir is handled by Config)
+os.makedirs(app.config['RESULTS_FOLDER'], exist_ok=True)
+
+analysis_state = {'running': False, 'progress': 0, 'status': 'Idle', 'current': ''}
+
+# METRIC NAMES WITH DESCRIPTIONS
+METRIC_INFO = {
+    'initial_area_px': {'name': 'Starting Wound Size (px)', 'unit': 'px²'},
+    'final_area_px': {'name': 'Final Wound Size (px)', 'unit': 'px²'},
+    'healing_rate_px_per_hr': {'name': 'Healing Speed (px/hr)', 'unit': 'px/hr'},
+    'pixel_scale': {'name': 'Pixel Scale', 'unit': 'µm/px'},
+    'initial_area_mm2': {'name': 'Starting Wound Size', 'unit': 'mm²'},
+    'final_area_mm2': {'name': 'Final Wound Size', 'unit': 'mm²'},
+    'healing_rate_um_per_hr': {'name': 'Healing Speed', 'unit': 'µm/hr'},
+    'time_to_50_closure_hr': {'name': 'Time to 50% Closure', 'unit': 'hours'},
+    'final_closure_pct': {'name': 'Wound Closure', 'unit': '%'},
+    'r_squared': {'name': 'Healing Consistency (R²)', 'unit': ''},
+    'num_timepoints': {'name': 'Frames Analyzed', 'unit': ''},
+    'area_mean_mm2': {'name': 'Mean Wound Area', 'unit': 'mm²'},
+    'area_std_mm2': {'name': 'Area Variability (SD)', 'unit': 'mm²'},
+    'healing_rate_mean_um_per_hr': {'name': 'Mean Frame-to-Frame Speed', 'unit': 'µm/hr'},
+    'healing_rate_std_um_per_hr': {'name': 'Speed Variability (SD)', 'unit': 'µm/hr'},
+    'num_cells_tracked': {'name': 'Cells Tracked', 'unit': ''},
+    'mean_velocity_um_min': {'name': 'Mean Cell Velocity', 'unit': 'µm/min'},
+    'migration_efficiency_mean': {'name': 'Migration Efficiency', 'unit': ''},
+    'mean_directionality': {'name': 'Mean Directionality', 'unit': ''},
+    "initial_area_um2": {"name": "Starting Wound Size", "unit": "µm²"},
+    "final_area_um2": {"name": "Final Wound Size", "unit": "µm²"},
+    "healing_rate_um2_per_hr": {"name": "Healing Speed", "unit": "µm²/hr"},
+    "pixel_scale_um_per_px": {"name": "Pixel Scale", "unit": "µm/px"}
+}
+
+CONDITION_NAMES = {
+    'MDCK_Control': ('🧬 Epithelial Cells (Baseline)', 'Normal epithelial cells - baseline'),
+    'MDCK_HGF': ('⚡ Epithelial + Growth Factor', 'Epithelial cells treated with HGF/SF'),
+    'DA3_Control': ('🔬 Cancer Cells (Baseline)', 'Cancer cells - baseline'),
+    'DA3_PHA': ('💊 Cancer + Immune Activation', 'Cancer cells with immune activation'),
+    'DA3_HGF': ('🔥 Cancer + Growth Factor', 'Cancer cells with growth factor'),
+    'Uploaded Data': ('📤 Uploaded Data', 'User-uploaded dataset')
+}
 
 
-def get_datasets():
-    datasets = []
-    base_path = 'data/raw/real_dataset'
-    if not os.path.exists(base_path):
-        return datasets
-    for condition in sorted(os.listdir(base_path)):
-        cond_path = os.path.join(base_path, condition)
-        if os.path.isdir(cond_path):
-            for exp in sorted(os.listdir(cond_path)):
-                result_path = f"results/real_data/{condition}/{exp}/csv/{exp}_summary.json"
-                analyzed = os.path.exists(result_path)
-                datasets.append(
-                    {'id': f"{condition}/{exp}", 'condition': condition, 'experiment': exp, 'analyzed': analyzed})
-    return datasets
+# --- REMOVED: get_available_datasets() function is no longer needed ---
 
 
-def get_results():
+# ----------------- Robust results discovery -----------------
+def get_all_results():
+    """
+    Find *_summary.json files under RESULTS_FOLDER and create a list of result dicts.
+    """
     results = []
-    summary_files = glob.glob('results/real_data/*/*/csv/*_summary.json')
-    for file in sorted(summary_files):
+    base = os.path.abspath(app.config['RESULTS_FOLDER'])
+    if not os.path.exists(base):
+        return results
+
+    pattern = os.path.join(base, '**', '*_summary.json')
+    summary_files = glob.glob(pattern, recursive=True)
+
+    for sfile in sorted(summary_files, key=os.path.getmtime, reverse=True):
         try:
-            with open(file, 'r') as f:
-                data = json.load(f)
-            parts = file.split('/')
-            condition = parts[2]
-            exp_id = parts[3]
-            plot_path = f"results/real_data/{condition}/{exp_id}/plots/{exp_id}_analysis.png"
-            csv_path = f"results/real_data/{condition}/{exp_id}/csv/{exp_id}_timeseries.csv"
-            if os.path.exists(plot_path):
-                csv_data = ""
-                chart_data = None
-                if os.path.exists(csv_path):
-                    with open(csv_path, 'r') as cf:
-                        csv_data = cf.read()
-                    df = pd.read_csv(csv_path)
-                    chart_data = {'time': df['time_hours'].tolist(), 'area': df['wound_area_px'].tolist(),
-                                  'closure': df['closure_percentage'].tolist()}
-                with open(plot_path, 'rb') as f:
-                    img_data = base64.b64encode(f.read()).decode()
-                results.append({'id': exp_id, 'condition': condition, 'data': data, 'plot': img_data, 'csv': csv_data,
-                                'chart_data': chart_data})
-        except Exception as e:
-            print(f"Error: {e}")
+            with open(sfile, 'r', encoding='utf-8') as f:
+                raw = json.load(f)
+        except Exception:
+            raw = None
+
+        rel = os.path.relpath(sfile, base).replace(os.sep, '/')
+        parts = rel.split('/')
+        if parts[0] == 'uploads' and len(parts) >= 3:
+            result_id = posixpath.join('uploads', parts[1])  # e.g., uploads/uuid
+            condition = 'Uploaded Data'
+            experiment_name = raw.get('experiment', os.path.splitext(parts[-1])[0].replace('_summary', ''))
+            base_result_dir = os.path.join(base, 'uploads', parts[1])
+        else:
+            if len(parts) >= 3:  # e.g., DA3_Control/CIL_43406/csv/DA3_Control_CIL_43406_summary.json
+                condition = parts[0]
+                experiment_name = parts[1]
+                base_result_dir = os.path.join(base, parts[0], experiment_name)
+                result_id = posixpath.join(parts[0], experiment_name)
+            else:
+                condition = 'Unknown'
+                experiment_name = raw.get('experiment', os.path.splitext(parts[-1])[0].replace('_summary', ''))
+                base_result_dir = os.path.dirname(sfile)
+                result_id = experiment_name
+
+        base_name = raw.get('experiment', os.path.splitext(os.path.basename(sfile))[0].replace('_summary', ''))
+
+        plot_candidates = [
+            os.path.join(base_result_dir, 'plots', f'{base_name}_analysis.png'),
+            os.path.join(base_result_dir, 'plots', f'{base_name}.png'),
+            os.path.join(base_result_dir, f'{base_name}.png'),
+        ]
+        csv_candidates = [
+            os.path.join(base_result_dir, 'csv', f'{base_name}_timeseries.csv'),
+            os.path.join(base_result_dir, f'{base_name}.csv'),
+        ]
+        video_candidates = [
+            os.path.join(base_result_dir, 'video', f'{base_name}_analysis_video.mp4'),
+            os.path.join(base_result_dir, 'video', f'{base_name}.mp4'),
+        ]
+
+        def pick_first_existing(cands):
+            for c in cands:
+                if c and os.path.exists(c):
+                    return c
+            return None
+
+        plot_path = pick_first_existing(plot_candidates)
+        csv_path = pick_first_existing(csv_candidates)
+        video_path = pick_first_existing(video_candidates)
+
+        gallery_dir = os.path.join(base_result_dir, 'gallery')
+        gallery_files = []
+        if os.path.isdir(gallery_dir):
+            for ext in ('*.png', '*.jpg', '*.jpeg'):
+                gallery_files.extend(sorted(glob.glob(os.path.join(gallery_dir, ext))))
+        gallery_urls = [path_to_url_for_result(p) for p in gallery_files if path_to_url_for_result(p)]
+
+        interactive_json_path = os.path.join(base_result_dir, 'plots', f'{base_name}_analysis_interactive.json')
+        if not os.path.exists(interactive_json_path):
+            interactive_json_path = None
+
+        cond_name = CONDITION_NAMES.get(condition, (condition, ''))[0]
+
+        results.append({
+            'id': result_id,
+            'rel_summary_path': rel,
+            'summary_path': sfile,
+            'raw_summary': raw,
+            'csv_path': csv_path,
+            'plot_path': plot_path,
+            'plot_url': path_to_url_for_result(plot_path),
+            'interactive_plot_path': interactive_json_path,
+            'interactive_plot_url': path_to_url_for_result(interactive_json_path),
+            'gallery': gallery_files,
+            'gallery_thumbs': gallery_urls,
+            'video_path': video_path,
+            'video_url': path_to_url_for_result(video_path),
+            'condition': condition,
+            'condition_name': cond_name,
+            'experiment_name': experiment_name
+        })
+
+    results.sort(key=lambda r: os.path.getmtime(r['summary_path']) if os.path.exists(r['summary_path']) else 0,
+                 reverse=True)
     return results
 
 
-def run_analysis(dataset_id, disk_size, time_interval):
+def path_to_url_for_result(fs_path: Optional[str]) -> Optional[str]:
+    if not fs_path:
+        return None
+    base = os.path.abspath(app.config['RESULTS_FOLDER'])
+    try:
+        abs_path = os.path.abspath(fs_path)
+        rel = os.path.relpath(abs_path, base)
+    except Exception:
+        return None
+    if rel.startswith('..'):
+        return None
+    rel_url = rel.replace(os.sep, '/').lstrip('./')
+    return f'/results_data/{rel_url}'
+
+
+# ----------------- Statistics & helpers -----------------
+
+# --- NEW: Plotting functions for Stats page ---
+def create_correlation_heatmap_json(df: pd.DataFrame) -> str:
+    """Generates a Plotly heatmap JSON from a metrics DataFrame."""
+    if df.empty or len(df.columns) < 2:
+        return "{}"
+    try:
+        # Compute correlation, ensuring only numeric columns are used
+        corr = df.corr(numeric_only=True)
+        if corr.empty:
+            return "{}"
+
+        fig = go.Figure(data=go.Heatmap(
+            z=corr.values,
+            x=corr.columns,
+            y=corr.columns,
+            colorscale='Teal',  # Use our theme color
+            zmin=-1, zmax=1,
+            text=corr.values,
+            texttemplate="%{text:.2f}",
+            hoverongaps=False))
+        fig.update_layout(
+            title="Metric Correlation Heatmap",
+            template="plotly_dark",
+            height=600,
+            xaxis_showgrid=False, yaxis_showgrid=False,
+            yaxis_autorange='reversed'
+        )
+        return pio.to_json(fig)
+    except Exception as e:
+        logger.error(f"Error creating correlation heatmap: {e}")
+        return "{}"
+
+
+def create_stats_box_plots_json(df: pd.DataFrame) -> str:
+    """Generates Plotly box plots for key metrics, faceted by condition."""
+    if df.empty:
+        return "{}"
+    try:
+        # Melt dataframe to long format for easier plotting with plotly express
+        metrics_to_plot = [
+            'Closure (%)', 'Healing Speed (µm²/hr)', 'Consistency (R²)',
+            'Cell Velocity (µm/min)', 'Efficiency', 'Directionality'
+        ]
+        # Ensure only available metrics are used
+        available_metrics = [m for m in metrics_to_plot if m in df.columns]
+        if not available_metrics:
+            return "{}"
+
+        df_melted = df.melt(id_vars=['Condition'], value_vars=available_metrics,
+                            var_name='Metric', value_name='Value')
+
+        fig = px.box(df_melted, x='Condition', y='Value',
+                     color='Condition',
+                     facet_row='Metric',
+                     title="Metric Distributions by Condition")
+
+        fig.update_layout(
+            template="plotly_dark",
+            height=min(max(1000, len(available_metrics) * 300), 2000),  # Dynamic height
+            showlegend=False
+        )
+        # Make y-axes independent so scales are correct
+        fig.update_yaxes(matches=None, showticklabels=True)
+        # Clean up facet labels
+        fig.for_each_annotation(lambda a: a.update(text=a.text.split("=")[1]))
+
+        return pio.to_json(fig)
+    except Exception as e:
+        logger.error(f"Error creating box plots: {e}")
+        return "{}"
+
+
+# ----------------- Analysis runner -----------------
+def run_analysis(input_dir, output_dir, disk_size, time_interval, pixel_scale, analysis_id, sample_id=None):
     global analysis_state
     try:
-        condition, exp_id = dataset_id.split('/')
-        input_dir = f"data/raw/real_dataset/{condition}/{exp_id}"
-        output_dir = f"results/real_data/{condition}/{exp_id}"
         analysis_state['running'] = True
         analysis_state['progress'] = 0
-        analysis_state['status'] = 'Starting analysis...'
-        cmd = ['python', 'src/batch_analysis.py', '--input', input_dir, '--output', output_dir, '--disk-size',
-               str(disk_size), '--time-interval', str(time_interval), '--visualize']
-        process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-        stdout, stderr = process.communicate()
+        analysis_state['status'] = f'Starting analysis for {analysis_id}'
+        analysis_state['current'] = analysis_id
+        os.makedirs(output_dir, exist_ok=True)
+
+        safe_sample_id = secure_filename(sample_id) if sample_id else secure_filename(analysis_id)
+
+        cmd = ['python', 'batch_analysis.py', '--input', input_dir, '--output', output_dir,
+               '--disk-size', str(disk_size), '--time-interval', str(time_interval),
+               '--pixel-scale', str(pixel_scale), '--visualize', '--track-cells',
+               '--experiment-name', safe_sample_id]
+
+        process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1,
+                                   universal_newlines=True)
+        for line in iter(process.stdout.readline, ''):
+            logger.info(line.rstrip())
+            if "Auto-selected best disk size" in line:
+                analysis_state['status'] = f'Auto-selected parameters... {line.split(":")[-1].strip()}'
+            elif "Analyzing" in line:
+                analysis_state['status'] = f'Processing frames for {safe_sample_id}...'
+            elif "Creating overlay gallery" in line:
+                analysis_state['status'] = f'Creating gallery for {safe_sample_id}...'
+                analysis_state['progress'] = 50
+            elif "Creating animation" in line:
+                analysis_state['status'] = f'Creating video for {safe_sample_id}...'
+                analysis_state['progress'] = 75
+
+        _, stderr = process.communicate()
         if process.returncode == 0:
             analysis_state['progress'] = 100
-            analysis_state['status'] = 'Analysis complete!'
+            analysis_state['status'] = f'✅ Complete: {safe_sample_id}'
+
+            try:
+                summary_path = os.path.join(output_dir, 'csv', f'{safe_sample_id}_summary.json')
+                if os.path.exists(summary_path):
+                    with open(summary_path, 'r') as f:
+                        summary_data = json.load(f)
+
+                    base_results_dir = os.path.abspath(app.config['RESULTS_FOLDER'])
+                    rel_output_dir = os.path.relpath(output_dir, base_results_dir)
+                    result_id = rel_output_dir.replace(os.sep, '/')
+
+                    summary_data['experiment_name'] = safe_sample_id
+                    if 'uploads' in result_id:
+                        summary_data['condition_name'] = 'Uploaded Data'
+                    else:
+                        condition_key = result_id.split('/')[0]
+                        summary_data['condition_name'] = CONDITION_NAMES.get(condition_key, (condition_key,))[0]
+
+                    database.upsert_experiment(summary_data, result_id)
+                else:
+                    logger.error(f"Could not find summary file to save to DB: {summary_path}")
+            except Exception as e:
+                logger.error(f"Failed to save result to database: {e}", exc_info=True)
+
         else:
-            analysis_state['status'] = f'Error: {stderr}'
+            error_message = stderr[-200:] if stderr else "Unknown error"
+            analysis_state['status'] = f'❌ Error running analysis for {safe_sample_id}: {error_message}'
+            logger.error(f"Analysis Error: {stderr}")
     except Exception as e:
-        analysis_state['status'] = f'Error: {str(e)}'
+        analysis_state['status'] = f'❌ Error: {str(e)}'
+        logger.exception(f"Exception in run_analysis: {e}")
     finally:
         analysis_state['running'] = False
 
 
+# ----------------- Routes -----------------
 @app.route('/')
 def index():
-    results = get_results()
-    datasets = get_datasets()
+    """Main route that renders the HTML page (enriches results to match template expectations)."""
+    results = get_all_results()
+
+    for r in results:
+        r['data'] = r.get('raw_summary') or {}
+        if 'condition_name' not in r or not r['condition_name']:
+            cond = r.get('condition', 'Unknown')
+            r['condition_name'] = CONDITION_NAMES.get(cond, (cond.replace('_', ' ').title(), ''))[0]
+
+        r['plot_b64'] = None
+        plot_path = r.get('plot_path')
+        try:
+            if plot_path and os.path.exists(plot_path):
+                with open(plot_path, 'rb') as pf:
+                    r['plot_b64'] = base64.b64encode(pf.read()).decode()
+        except Exception as e:
+            logger.warning(f"Warning reading plot for {r.get('id')}: {e}")
+            r['plot_b64'] = None
+
+        r['csv_b64'] = ""
+        csv_path = r.get('csv_path')
+        try:
+            if csv_path and os.path.exists(csv_path):
+                with open(csv_path, 'r', encoding='utf-8') as cf:
+                    r['csv_b64'] = base64.b64encode(cf.read().encode()).decode()
+        except Exception as e:
+            logger.warning(f"Warning reading csv for {r.get('id')}: {e}")
+            r['csv_b64'] = ""
+
+        gallery_list = r.get('gallery') or []
+        thumbs = []
+        if gallery_list:
+            picks = [gallery_list[0]]
+            if len(gallery_list) > 2:
+                picks.append(gallery_list[len(gallery_list) // 2])
+            if len(gallery_list) > 1:
+                picks.append(gallery_list[-1])
+            for p in sorted(list(dict.fromkeys(picks))):
+                url = path_to_url_for_result(p)
+                if url:
+                    thumbs.append(url)
+        r['gallery_thumbs'] = thumbs
+
+        vpath = r.get('video_path')
+        if vpath and os.path.exists(vpath):
+            r['video_path'] = path_to_url_for_result(vpath)
+        else:
+            r['video_path'] = path_to_url_for_result(vpath) if vpath else None
+
+    # Page-level aggregates
+    # --- REMOVED: available_datasets ---
     total_exp = len(results)
-    total_cond = len(set(r['condition'] for r in results))
-    total_frames = sum(r['data']['num_timepoints'] for r in results) if results else 0
-    total_time = sum(r['data']['processing_time_sec'] for r in results) / 60 if results else 0
-    unanalyzed = [d for d in datasets if not d['analyzed']]
+    total_cond = len(set(r.get('condition', 'Unknown') for r in results))
+    total_frames = sum(int((r.get('data') or {}).get('num_timepoints', 0)) for r in results)
+    total_time = sum((r.get('data') or {}).get('processing_time_sec', 0) for r in results) / 60.0
 
-    html = """<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Wound Healing - Live Analysis</title>
-    <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { font-family: 'Segoe UI'; background: linear-gradient(135deg, #667eea, #764ba2); min-height: 100vh; padding: 20px; }
-        .container { max-width: 1800px; margin: 0 auto; }
-        .header { background: white; border-radius: 15px; padding: 30px; margin-bottom: 30px; box-shadow: 0 10px 30px rgba(0,0,0,0.2); }
-        .header h1 { color: #667eea; font-size: 2.5em; }
-        .tabs { display: flex; gap: 10px; margin-bottom: 20px; }
-        .tab-btn { padding: 12px 25px; border: none; background: white; color: #667eea; font-weight: bold; cursor: pointer; border-radius: 5px; }
-        .tab-btn.active { background: #667eea; color: white; }
-        .tab-content { display: none; }
-        .tab-content.active { display: block; }
-        .live-panel { background: white; border-radius: 15px; padding: 30px; box-shadow: 0 10px 30px rgba(0,0,0,0.2); }
-        .form-group { margin-bottom: 20px; }
-        .form-group label { display: block; font-weight: bold; margin-bottom: 8px; }
-        .form-group select, .form-group input { width: 100%; padding: 10px; border: 2px solid #667eea; border-radius: 5px; }
-        .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
-        .btn-primary { background: #667eea; color: white; padding: 12px 30px; border: none; border-radius: 5px; font-weight: bold; cursor: pointer; }
-        .btn-primary:hover { background: #764ba2; }
-        .progress-section { margin-top: 30px; display: none; }
-        .progress-section.active { display: block; }
-        .progress-bar { width: 100%; height: 30px; background: #f0f0f0; border-radius: 15px; overflow: hidden; margin-bottom: 10px; }
-        .progress-fill { height: 100%; background: linear-gradient(90deg, #667eea, #764ba2); width: 0%; transition: width 0.3s; display: flex; align-items: center; justify-content: center; color: white; font-weight: bold; }
-        .status { padding: 15px; border-radius: 5px; margin: 10px 0; }
-        .status.info { background: #e3f2fd; color: #1976d2; }
-        .status.success { background: #e8f5e9; color: #2e7d32; }
-        .filter-buttons { display: flex; gap: 10px; margin-bottom: 20px; flex-wrap: wrap; }
-        .filter-btn { padding: 10px 20px; border: none; background: white; color: #667eea; font-weight: bold; cursor: pointer; border-radius: 5px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); transition: all 0.3s; }
-        .filter-btn:hover, .filter-btn.active { background: #667eea; color: white; transform: translateY(-2px); }
-        .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; margin-bottom: 30px; }
-        .stat-card { background: white; border-radius: 10px; padding: 20px; box-shadow: 0 5px 15px rgba(0,0,0,0.1); text-align: center; }
-        .stat-card h3 { color: #667eea; font-size: 2em; }
-        .experiments-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 30px; }
-        @media (max-width: 1400px) { .experiments-grid { grid-template-columns: 1fr; } }
-        .experiment-card { background: white; border-radius: 15px; padding: 25px; box-shadow: 0 10px 30px rgba(0,0,0,0.2); }
-        .experiment-header { border-bottom: 3px solid #667eea; padding-bottom: 15px; margin-bottom: 20px; }
-        .experiment-header h2 { color: #333; font-size: 1.4em; }
-        .condition-badge { display: inline-block; padding: 5px 15px; border-radius: 20px; font-size: 0.85em; font-weight: bold; margin-top: 5px; }
-        .badge-mdck-control { background: #e3f2fd; color: #1976d2; }
-        .badge-mdck-hgf { background: #f3e5f5; color: #7b1fa2; }
-        .badge-da3-control { background: #fff3e0; color: #e65100; }
-        .badge-da3-hgf { background: #e8f5e9; color: #2e7d32; }
-        .plot-container { width: 100%; margin: 20px 0; border-radius: 10px; overflow: hidden; }
-        .plot-container img { width: 100%; height: auto; display: block; object-fit: contain; }
-        .metrics-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin: 20px 0; }
-        .metric { background: #f5f5f5; padding: 12px; border-radius: 8px; border-left: 4px solid #667eea; position: relative; }
-        .metric-label { color: #666; font-size: 0.8em; margin-bottom: 5px; display: block; }
-        .metric-value { color: #333; font-size: 1.2em; font-weight: bold; display: block; }
-        
-        /* Enhanced Aesthetic Design */
-        body { background: linear-gradient(135deg, #667eea 0%, #764ba2 50%, #f093fb 100%); }
-        
-        .header { border-top: 5px solid #667eea; }
-        .header h1 { background: linear-gradient(135deg, #667eea, #764ba2); -webkit-background-clip: text; -webkit-text-fill-color: transparent; font-weight: 800; letter-spacing: 1px; }
-        .header p { color: #999; font-size: 1.05em; font-weight: 500; }
-        
-        .tabs { border-bottom: 2px solid rgba(255,255,255,0.1); padding-bottom: 15px; }
-        .tab-btn { border-bottom: 3px solid transparent; border-radius: 0; font-size: 1.05em; transition: all 0.4s ease; }
-        .tab-btn.active { border-bottom-color: #667eea; background: transparent; box-shadow: 0 4px 0 #667eea; }
-        
-        .live-panel { border-top: 5px solid #667eea; box-shadow: 0 20px 60px rgba(0,0,0,0.3); }
-        .live-panel h2 { background: linear-gradient(135deg, #667eea, #764ba2); -webkit-background-clip: text; -webkit-text-fill-color: transparent; font-size: 1.8em; margin-bottom: 30px; }
-        
-        .form-group label { color: #667eea; font-weight: 600; font-size: 1.05em; }
-        .form-group select, .form-group input { border-radius: 10px; background: #f8f9ff; transition: all 0.3s; box-shadow: 0 4px 15px rgba(102, 126, 234, 0.1); }
-        .form-group select:focus, .form-group input:focus { outline: none; box-shadow: 0 8px 25px rgba(102, 126, 234, 0.25); transform: translateY(-2px); }
-        
-        .btn-primary { border-radius: 10px; font-size: 1.1em; box-shadow: 0 8px 20px rgba(102, 126, 234, 0.4); transition: all 0.3s; }
-        .btn-primary:hover { transform: translateY(-3px); box-shadow: 0 12px 30px rgba(102, 126, 234, 0.6); }
-        .btn-primary:active { transform: translateY(-1px); }
-        
-        .progress-fill { font-weight: 700; letter-spacing: 1px; }
-        
-        .filter-buttons { gap: 15px; margin-bottom: 30px; padding-bottom: 20px; border-bottom: 2px solid rgba(255,255,255,0.1); }
-        .filter-btn { border-radius: 25px; font-size: 1em; box-shadow: 0 4px 15px rgba(0,0,0,0.1); transition: all 0.4s cubic-bezier(0.4, 0.0, 0.2, 1); border: 2px solid transparent; }
-        .filter-btn:hover { box-shadow: 0 8px 25px rgba(102, 126, 234, 0.3); transform: translateY(-3px); }
-        .filter-btn.active { box-shadow: 0 10px 30px rgba(102, 126, 234, 0.5); transform: scale(1.05); border-color: #667eea; }
-        
-        .stat-card { border-radius: 15px; border-top: 4px solid #667eea; transition: all 0.4s; box-shadow: 0 10px 30px rgba(0,0,0,0.1); }
-        .stat-card:hover { transform: translateY(-8px); box-shadow: 0 20px 50px rgba(102, 126, 234, 0.3); }
-        .stat-card h3 { font-size: 2.5em; font-weight: 800; }
-        .stat-card p { color: #999; font-weight: 500; font-size: 1.05em; }
-        
-        .experiment-card { border-radius: 20px; box-shadow: 0 15px 40px rgba(0,0,0,0.15); transition: all 0.4s cubic-bezier(0.4, 0.0, 0.2, 1); border: 1px solid rgba(255,255,255,0.1); overflow: hidden; }
-        .experiment-card:hover { transform: translateY(-12px); box-shadow: 0 30px 60px rgba(102, 126, 234, 0.4); }
-        
-        .experiment-header { border-bottom: 3px solid #667eea; padding-bottom: 20px; background: linear-gradient(135deg, rgba(102, 126, 234, 0.05), rgba(118, 75, 162, 0.05)); }
-        .experiment-header h2 { font-size: 1.6em; font-weight: 700; }
-        
-        .condition-badge { font-weight: 600; box-shadow: 0 4px 15px rgba(0,0,0,0.15); }
-        
-        .plot-container { border-radius: 15px; box-shadow: inset 0 2px 8px rgba(0,0,0,0.1); transition: all 0.3s; }
-        .plot-container:hover { box-shadow: 0 8px 25px rgba(102, 126, 234, 0.2); }
-        
-        .metrics-grid { gap: 15px; }
-        .metric { border-radius: 12px; border-left: 4px solid #667eea; transition: all 0.3s; box-shadow: 0 4px 12px rgba(0,0,0,0.08); cursor: help; }
-        .metric:hover { transform: translateY(-4px); box-shadow: 0 12px 25px rgba(102, 126, 234, 0.2); background: #f8faff; }
-        .metric-label { color: #667eea; font-weight: 600; font-size: 0.85em; }
-        
-        .tooltiptext { background: linear-gradient(135deg, #333, #1a1a1a); border-left: 3px solid #667eea; }
-        
-        .download-btn { border-radius: 10px; font-size: 1em; box-shadow: 0 8px 20px rgba(102, 126, 234, 0.35); transition: all 0.3s; }
-        .download-btn:hover { transform: translateY(-3px); box-shadow: 0 12px 30px rgba(102, 126, 234, 0.5); }
-        
-        /* Smooth Animations */
-        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
-        .experiment-card { animation: fadeIn 0.5s ease forwards; }
-        
-        /* Glassmorphism effect */
-        .live-panel { backdrop-filter: blur(10px); }
-        .tooltip { position: relative; display: inline; }
-        .tooltiptext { visibility: hidden; width: 200px; background-color: #333; color: #fff; text-align: center; border-radius: 6px; padding: 8px; position: absolute; z-index: 1; bottom: 125%; left: 50%; margin-left: -100px; opacity: 0; transition: opacity 0.3s; font-size: 0.75em; white-space: normal; }
-        .metric:hover .tooltiptext { visibility: visible; opacity: 1; }
-        .download-btn { background: #667eea; color: white; padding: 10px 20px; border-radius: 5px; border: none; cursor: pointer; font-weight: bold; margin-top: 15px; }
-        .download-btn:hover { background: #764ba2; }
-    </style>
-</head>
-<body>
-    <div class="container">
-                <div class="header">
-            <h1>🔬 Wound Healing Analysis Dashboard</h1>
-            <p>✨ Real-time Live Analysis with Advanced Visualization</p>
-        </div>
+    # --- NEW: Get stats from database ---
+    cond_stats = database.get_stats_by_condition()
+    pvalues = database.calculate_all_pvalues()
+
+    # --- NEW: Generate plots for Stats page ---
+    metrics_df = database.get_all_metrics_for_plots()
+    correlation_json = create_correlation_heatmap_json(metrics_df)
+    box_plots_json = create_stats_box_plots_json(metrics_df)
+
+    all_conditions = sorted(
+        set(r.get('condition', 'Unknown') for r in results if r.get('condition', 'Unknown') != 'Uploaded Data'))
+
+    condition_names_safe = dict(CONDITION_NAMES)
+    for cond in sorted(set(r.get('condition', 'Unknown') for r in results)):
+        if cond not in condition_names_safe:
+            condition_names_safe[cond] = (cond.replace('_', ' ').title(), '')
+
+    return render_template('index.html',
+                           results=results,
+                           total_exp=total_exp,
+                           total_cond=total_cond,
+                           total_frames=total_frames,
+                           total_time=total_time,
+                           # --- REMOVED: available_datasets ---
+                           cond_stats=cond_stats,
+                           pvalues=pvalues,
+                           all_conditions=all_conditions,
+                           condition_names=condition_names_safe,
+                           metric_info=METRIC_INFO,
+                           correlation_json=correlation_json,  # NEW
+                           box_plots_json=box_plots_json  # NEW
+                           )
 
 
-        <div class="tabs">
-            <button class="tab-btn active" onclick="switchTab('live')">Live Analysis</button>
-            <button class="tab-btn" onclick="switchTab('dashboard')">Dashboard</button>
-        </div>
+@app.route('/api/upload', methods=['POST'])
+def api_upload():
+    try:
+        if 'file' not in request.files:
+            return jsonify({'error': 'No file part'}), 400
+        file = request.files['file']
+        if file.filename == '':
+            return jsonify({'error': 'No selected file'}), 400
 
-        <div id="live" class="tab-content active">
-            <div class="live-panel">
-                <h2>Live Analysis Panel</h2>
+        frame_interval = int(request.form.get('frameInterval', 5))
 
-                <div class="form-group">
-                    <label>Select Dataset:</label>
-                    <select id="datasetSelect">
-                        <option value="">-- Choose --</option>
-"""
+        filename = secure_filename(file.filename)
+        analysis_id = str(uuid.uuid4())
+        input_dir = os.path.join(app.config['UPLOAD_FOLDER'], analysis_id)
+        os.makedirs(input_dir, exist_ok=True)
+        save_path = os.path.join(input_dir, filename)
+        file.save(save_path)
 
-    for d in unanalyzed:
-        html += f'                        <option value="{d["id"]}">{d["condition"]} - {d["experiment"]}</option>\n'
+        if filename.lower().endswith('.zip'):
+            with zipfile.ZipFile(save_path, 'r') as zip_ref:
+                zip_ref.extractall(input_dir)
+            os.remove(save_path)
+        elif filename.lower().endswith(('.mp4', '.avi', '.mov', '.mkv')):
+            vidcap = cv2.VideoCapture(save_path)
+            success, image = vidcap.read()
+            count, frame_num = 0, 0
+            while success:
+                if count % frame_interval == 0:
+                    cv2.imwrite(os.path.join(input_dir, f"frame_{frame_num:04d}.png"), image)
+                    frame_num += 1
+                success, image = vidcap.read()
+                count += 1
+            os.remove(save_path)
+        elif filename.lower().endswith(('.tif', '.tiff', '.gif')):
+            img = Image.open(save_path)
+            for i, page in enumerate(ImageSequence.Iterator(img)):
+                page.convert('L').save(os.path.join(input_dir, f"frame_{i:04d}.png"))
+            os.remove(save_path)
 
-    html += f"""                    </select>
-                </div>
+        extracted_items = os.listdir(input_dir)
+        if len(extracted_items) == 1 and os.path.isdir(os.path.join(input_dir, extracted_items[0])):
+            if extracted_items[0] != "__MACOSX":
+                sub_dir = os.path.join(input_dir, extracted_items[0])
+                for item in os.listdir(sub_dir):
+                    shutil.move(os.path.join(sub_dir, item), input_dir)
+                os.rmdir(sub_dir)
 
-                <div class="form-row">
-                    <div class="form-group">
-                        <label>Disk Size:</label>
-                        <input type="number" id="diskSize" value="10" min="5" max="20">
-                    </div>
-                    <div class="form-group">
-                        <label>Time Interval (hours):</label>
-                        <input type="number" id="timeInterval" value="0.25" min="0.1" max="1" step="0.05">
-                    </div>
-                </div>
-
-                <button class="btn-primary" onclick="startAnalysis()">START ANALYSIS</button>
-
-                <div class="progress-section" id="progressSection">
-                    <h3>Progress</h3>
-                    <div class="progress-bar">
-                        <div class="progress-fill" id="progressFill" style="width: 0%;">0%</div>
-                    </div>
-                    <div id="statusMessage"></div>
-                </div>
-            </div>
-        </div>
-
-        <div id="dashboard" class="tab-content">
-                                    <div class="filter-buttons">
-                <button class="filter-btn active" onclick="filterExperiments('all')">🔬 All Experiments</button>
-                <button class="filter-btn" onclick="filterExperiments('MDCK_Control')">📊 MDCK Control</button>
-                <button class="filter-btn" onclick="filterExperiments('MDCK_HGF')">🧪 MDCK +HGF/SF</button>
-                <button class="filter-btn" onclick="filterExperiments('DA3_Control')">📈 DA3 Control</button>
-                <button class="filter-btn" onclick="filterExperiments('DA3_HGF')">🔬 DA3 +HGF/SF</button>
-                <button class="filter-btn" onclick="filterExperiments('DA3_PHA')">💊 DA3 PHA</button>
-            </div>
-
-
-
-            <div class="stats-grid">
-                <div class="stat-card"><h3>{total_exp}</h3><p>Experiments</p></div>
-                <div class="stat-card"><h3>{total_cond}</h3><p>Conditions</p></div>
-                <div class="stat-card"><h3>{total_frames}</h3><p>Frames</p></div>
-                <div class="stat-card"><h3>{total_time:.1f} min</h3><p>Time</p></div>
-            </div>
-
-            <div class="experiments-grid" id="experiments">
-"""
-
-    for result in results:
-        data = result['data']
-        condition = result['condition']
-        exp_id = result['id']
-        badge_class = f"badge-{condition.lower().replace('_', '-')}"
-        csv_b64 = base64.b64encode(result['csv'].encode()).decode()
-
-        html += f"""                <div class="experiment-card" data-condition="{condition}">
-                    <div class="experiment-header">
-                        <h2>{exp_id}</h2>
-                        <span class="condition-badge {badge_class}">{condition.replace('_', ' ')}</span>
-                    </div>
-                    <div class="plot-container">
-                        <img src="data:image/png;base64,{result['plot']}" alt="{exp_id}">
-                    </div>
-                    <div class="metrics-grid">
-                        <div class="metric">
-                            <span class="metric-label">Initial Area</span>
-                            <span class="metric-value">{data['initial_area_px']:.0f} px</span>
-                            <div class="tooltiptext">Wound area at start. Larger = bigger wounds.</div>
-                        </div>
-                        <div class="metric">
-                            <span class="metric-label">Final Area</span>
-                            <span class="metric-value">{data['final_area_px']:.0f} px</span>
-                            <div class="tooltiptext">Wound area at end. Smaller = better healing.</div>
-                        </div>
-                        <div class="metric">
-                            <span class="metric-label">Closure</span>
-                            <span class="metric-value">{data['final_closure_pct']:.1f}%</span>
-                            <div class="tooltiptext">Percentage closed: ((Initial - Final) / Initial) x 100%</div>
-                        </div>
-                        <div class="metric">
-                            <span class="metric-label">Healing Rate</span>
-                            <span class="metric-value">{abs(data['healing_rate_px_per_hr']):.1f} px/hr</span>
-                            <div class="tooltiptext">Speed of closure in pixels per hour.</div>
-                        </div>
-                        <div class="metric">
-                            <span class="metric-label">R2 Value</span>
-                            <span class="metric-value">{data['r_squared']:.3f}</span>
-                            <div class="tooltiptext">Goodness of fit (0-1). Above 0.7 = good.</div>
-                        </div>
-                        <div class="metric">
-                            <span class="metric-label">Frames</span>
-                            <span class="metric-value">{data['num_timepoints']}</span>
-                            <div class="tooltiptext">Total frames analyzed.</div>
-                        </div>
-                    </div>
-                    <button class="download-btn" onclick="downloadCSV('{exp_id}', '{csv_b64}')">Download CSV</button>
-                </div>
-"""
-
-    html += """            </div>
-        </div>
-    </div>
-
-    <script>
-        function switchTab(tab) {
-            const contents = document.querySelectorAll('.tab-content');
-            const buttons = document.querySelectorAll('.tab-btn');
-            contents.forEach(el => el.classList.remove('active'));
-            buttons.forEach(el => el.classList.remove('active'));
-            document.getElementById(tab).classList.add('active');
-            event.target.classList.add('active');
-        }
-
-        function filterExperiments(condition) {
-            const cards = document.querySelectorAll('.experiment-card');
-            const buttons = document.querySelectorAll('.filter-btn');
-            buttons.forEach(btn => btn.classList.remove('active'));
-            event.target.classList.add('active');
-            cards.forEach(card => {
-                if (condition === 'all' || card.dataset.condition === condition) {
-                    card.style.display = 'block';
-                } else {
-                    card.style.display = 'none';
-                }
-            });
-        }
-
-        function startAnalysis() {
-            const datasetId = document.getElementById('datasetSelect').value;
-            if (!datasetId) {
-                alert('Select a dataset');
-                return;
-            }
-            document.getElementById('progressSection').classList.add('active');
-            document.getElementById('statusMessage').innerHTML = '<div class="status info">Analysis starting...</div>';
-
-            fetch('/api/analyze', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({
-                    dataset_id: datasetId,
-                    disk_size: document.getElementById('diskSize').value,
-                    time_interval: document.getElementById('timeInterval').value
-                })
-            }).then(r => r.json()).then(data => checkProgress());
-        }
-
-        function checkProgress() {
-            fetch('/api/status').then(r => r.json()).then(data => {
-                document.getElementById('progressFill').style.width = data.progress + '%';
-                document.getElementById('progressFill').textContent = data.progress + '%';
-                document.getElementById('statusMessage').innerHTML = '<div class="status info">' + data.status + '</div>';
-                if (data.running) {
-                    setTimeout(checkProgress, 1000);
-                } else if (data.progress === 100) {
-                    document.getElementById('statusMessage').innerHTML = '<div class="status success">Complete! Refreshing...</div>';
-                    setTimeout(() => location.reload(), 2000);
-                }
-            });
-        }
-
-        function downloadCSV(filename, data) {
-            const csvContent = atob(data);
-            const blob = new Blob([csvContent], {type: 'text/csv'});
-            const url = window.URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = filename + '_timeseries.csv';
-            a.click();
-        }
-    </script>
-</body>
-</html>
-"""
-
-    return render_template_string(html)
+        return jsonify({'status': 'uploaded', 'analysis_id': analysis_id})
+    except Exception as e:
+        logger.exception(f"Unhandled error in /api/upload: {e}")
+        return jsonify({'error': f'An internal server error occurred: {e}'}), 500
 
 
 @app.route('/api/analyze', methods=['POST'])
 def api_analyze():
-    global analysis_state
-    data = request.json
-    dataset_id = data.get('dataset_id')
-    disk_size = int(data.get('disk_size', 10))
-    time_interval = float(data.get('time_interval', 0.25))
-    thread = threading.Thread(target=run_analysis, args=(dataset_id, disk_size, time_interval))
-    thread.daemon = True
-    thread.start()
-    return jsonify({'status': 'started'})
+    try:
+        data = request.json
+        analysis_id = data.get('analysis_id')
+        if not analysis_id:
+            return jsonify({'error': 'No analysis_id provided'}), 400
+
+        disk_size = int(data.get('disk_size', 0))
+        time_interval = float(data.get('time_interval', 0.25))
+        pixel_scale = float(data.get('pixel_scale', 1.0))
+        sample_id = data.get('sample_id') or None
+
+        input_dir = os.path.join(app.config['UPLOAD_FOLDER'], analysis_id)
+        output_dir = os.path.join(app.config['RESULTS_FOLDER'], 'uploads', analysis_id)
+
+        thread_args = (input_dir, output_dir, disk_size, time_interval, pixel_scale, analysis_id, sample_id)
+        thread = threading.Thread(target=run_analysis, args=thread_args)
+        thread.daemon = True
+        thread.start()
+        return jsonify({'status': 'started', 'analysis_id': analysis_id})
+    except Exception as e:
+        logger.exception(f"Unhandled error in /api/analyze: {e}")
+        return jsonify({'error': f'An internal server error occurred: {e}'}), 500
+
+
+# --- REMOVED: /api/analyze_existing route ---
 
 
 @app.route('/api/status')
 def api_status():
-    global analysis_state
     return jsonify(analysis_state)
 
 
+@app.route('/api/comparison_data')
+def api_comparison_data():
+    try:
+        experiments = database.get_all_experiments_for_comparison()
+        return jsonify(experiments)
+    except Exception as e:
+        logger.error(f"Error fetching comparison data: {e}", exc_info=True)
+        return jsonify({"error": str(e)}), 500
+
+
+# --- NEW: Delete Experiment Endpoint ---
+@app.route('/api/delete_experiment', methods=['POST'])
+def api_delete_experiment():
+    data = request.json
+    result_id = data.get('result_id')
+    if not result_id:
+        return jsonify({'error': 'No result_id provided'}), 400
+
+    try:
+        # 1. Delete from database
+        db_deleted = database.delete_experiment(result_id)
+
+        # 2. Delete from file system
+        # Sanitize the result_id to prevent path traversal
+        safe_rel_path = os.path.normpath(result_id).replace('..', '')
+        if safe_rel_path.startswith('/'):
+            safe_rel_path = safe_rel_path[1:]
+
+        fs_path = os.path.join(app.config['RESULTS_FOLDER'], safe_rel_path)
+
+        if not os.path.exists(fs_path):
+            logger.warning(f"File path not found for deletion, but DB record might be gone: {fs_path}")
+            # If DB was deleted, we still count it as a success
+            if db_deleted:
+                return jsonify({'status': 'success', 'message': 'DB record deleted, file path not found.'})
+            else:
+                return jsonify({'error': 'Experiment not found in DB or file system.'}), 404
+
+        # Check if path is safely within the RESULTS_FOLDER
+        if not os.path.abspath(fs_path).startswith(os.path.abspath(app.config['RESULTS_FOLDER'])):
+            logger.error(f"Potential security violation: attempt to delete path outside results: {fs_path}")
+            return jsonify({'error': 'Invalid path'}), 400
+
+        # Delete the whole directory
+        shutil.rmtree(fs_path)
+        logger.info(f"Successfully deleted experiment files: {fs_path}")
+
+        return jsonify({'status': 'success', 'message': 'Experiment deleted from database and file system.'})
+
+    except Exception as e:
+        logger.error(f"Error deleting experiment '{result_id}': {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+
+# --- End of New Endpoint ---
+
+
+@app.route('/results_json/<path:exp_id>')
+def get_result_json(exp_id):
+    results = get_all_results()
+    target_result = next((res for res in results if res['id'] == exp_id), None)
+    if not target_result:
+        return jsonify({'error': 'Result not found'}), 404
+
+    data = dict(target_result.get('raw_summary') or {})
+
+    data['plot_url'] = target_result.get('plot_url')
+    data['plot_b64'] = None
+    if target_result.get('plot_path') and os.path.exists(target_result['plot_path']):
+        try:
+            with open(target_result['plot_path'], 'rb') as pf:
+                data['plot_b64'] = base64.b64encode(pf.read()).decode()
+        except Exception:
+            pass
+
+    data['interactive_plot_url'] = target_result.get('interactive_plot_url')
+    data['video_url'] = target_result.get('video_url')
+    data['gallery_thumbs'] = target_result.get('gallery_thumbs', [])
+    data['condition_name'] = target_result.get('condition_name')
+    data['experiment_name'] = target_result.get('experiment_name')
+
+    if target_result.get('csv_path') and os.path.exists(target_result['csv_path']):
+        try:
+            with open(target_result['csv_path'], 'r', encoding='utf-8') as cf:
+                data['csv_b64'] = base64.b64encode(cf.read().encode()).decode()
+            data['csv_url'] = path_to_url_for_result(target_result['csv_path'])
+        except Exception:
+            data['csv_b64'] = ""
+            data['csv_url'] = None
+    else:
+        data['csv_b64'] = ""
+        data['csv_url'] = None
+
+    if target_result.get('interactive_plot_path') and os.path.exists(target_result['interactive_plot_path']):
+        try:
+            with open(target_result['interactive_plot_path'], 'r', encoding='utf-8') as f:
+                data['plot_json'] = f.read()
+        except Exception:
+            data['plot_json'] = None
+    else:
+        data['plot_json'] = None
+
+    return jsonify(data)
+
+
+@app.route('/results_data/<path:filename>')
+def send_result_file(filename):
+    base_dir = os.path.abspath(app.config['RESULTS_FOLDER'])
+    safe_rel = os.path.normpath(filename).replace('..', '')
+    abs_path = os.path.abspath(os.path.join(base_dir, safe_rel))
+    if not abs_path.startswith(base_dir):
+        abort(404)
+    if not os.path.exists(abs_path):
+        abort(404)
+    rel_for_send = os.path.relpath(abs_path, base_dir)
+    return send_from_directory(base_dir, rel_for_send, as_attachment=False)
+
+
+@app.route('/download-pdf/<path:exp_id>')
+def download_pdf(exp_id):
+    results = get_all_results()
+    result = next((res for res in results if res['id'] == exp_id), None)
+    if not result:
+        return jsonify({'error': 'Not found'}), 404
+
+    data = result['raw_summary'] or {}
+    exp_name = result['experiment_name']
+    pdf_buffer = io.BytesIO()
+    doc = SimpleDocTemplate(pdf_buffer, pagesize=letter, topMargin=0.5 * inch, bottomMargin=0.5 * inch)
+    story = []
+    styles = getSampleStyleSheet()
+    title_style = ParagraphStyle('CustomTitle', parent=styles['Heading1'], fontSize=24,
+                                 textColor=colors.HexColor('#008B8B'), spaceAfter=30, alignment=1)
+    h3_style = ParagraphStyle('CustomH3', parent=styles['Heading3'], fontSize=14, textColor=colors.HexColor('#333333'),
+                              spaceAfter=10, spaceBefore=10)
+    story.append(Paragraph(f'Wound Healing Analysis Report', title_style))
+    story.append(Paragraph(f'<b>Experiment:</b> {exp_name}', styles['Normal']))
+    story.append(Paragraph(f'<b>Condition:</b> {result.get("condition_name")}', styles['Normal']))
+    story.append(Spacer(1, 0.3 * inch))
+    story.append(Paragraph('Wound Area Analysis', h3_style))
+    time_50_val = data.get('time_to_50_closure_hr')
+    time_50_str = f"{time_50_val:.1f}" if time_50_val is not None else "N/A"
+    pixel_scale = data.get('pixel_scale_um_per_px', 1.0)
+    area_unit = "µm²" if pixel_scale != 1.0 else "pixels"
+    speed_unit = "µm²/hr" if pixel_scale != 1.0 else "px/hr"
+    initial_area_display = data.get('initial_area_um2', data.get('initial_area_px', 0))
+    final_area_display = data.get('final_area_um2', data.get('final_area_px', 0))
+    healing_rate_display = abs(data.get('healing_rate_um2_per_hr', data.get('healing_rate_mean_px_per_hr', 0)))
+    mean_area_display = np.mean(data.get('areas_um2', data.get('areas_px', [0])))
+    std_area_display = np.std(data.get('areas_um2', data.get('areas_px', [0])))
+    table_data = [
+        ['Metric', 'Value', 'Unit'],
+        ['Starting Wound Size', f"{initial_area_display:.0f}", area_unit],
+        ['Final Wound Size', f"{final_area_display:.0f}", area_unit],
+        ['Wound Closure', f"{data.get('final_closure_pct', 0):.1f}", '%'],
+        ['Healing Speed (Slope)', f"{healing_rate_display:.2f}", speed_unit],
+        ['Healing Consistency (R²)', f"{data.get('r_squared', 0):.3f}", ''],
+        ['Time to 50% Closure', time_50_str, 'hours'],
+        ['Mean Wound Area', f"{mean_area_display:.0f}", area_unit],
+        ['Area Variability (SD)', f"± {std_area_display:.0f}", area_unit],
+        ['Total Frames', f"{data.get('num_timepoints', 0)}", ''],
+    ]
+    style_commands = [('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#008B8B')),
+                      ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+                      ('ALIGN', (0, 0), (-1, -1), 'CENTER'), ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                      ('FONTSIZE', (0, 0), (-1, 0), 12), ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+                      ('GRID', (0, 0), (-1, -1), 1, colors.HexColor('#DDDDDD')),
+                      ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.HexColor('#F4F4F4'), colors.white])]
+    cell_count = data.get('num_cells_tracked', data.get('num_cells', 0))
+    story.append(Table(table_data, colWidths=[2.5 * inch, 1.5 * inch, 1 * inch], style=style_commands))
+
+    if cell_count > 0:
+        story.append(Spacer(1, 0.2 * inch))
+        story.append(Paragraph('Cell Migration Analysis', h3_style))
+        mean_vel_val = data.get('mean_velocity_um_min', data.get('mean_velocity'))
+        mean_vel_str = f"{mean_vel_val:.2f}" if mean_vel_val is not None else "N/A"
+        mig_eff_val = data.get('migration_efficiency_mean', data.get('migration_efficiency'))
+        mig_eff_str = f"{mig_eff_val:.3f}" if mig_eff_val is not None else "N/A"
+        mean_disp_val = data.get('mean_displacement_um', data.get('mean_displacement'))
+        mean_disp_str = f"{mean_disp_val:.2f}" if mean_disp_val is not None else "N/A"
+        mean_path_val = data.get('mean_path_length_um', data.get('mean_path_length'))
+        mean_path_str = f"{mean_path_val:.2f}" if mean_path_val is not None else "N/A"
+        directionality_val = data.get('mean_directionality')
+        directionality_str = f"{directionality_val:.3f}" if directionality_val is not None else "N/A"
+
+        tracking_table_data = [
+            ['Metric', 'Value', 'Unit'],
+            ['Cells Tracked', f"{cell_count}", ''],
+            ['Mean Velocity', mean_vel_str, 'μm/min'],
+            ['Migration Efficiency', mig_eff_str, ''],
+            ['Mean Directionality', directionality_str, ''],
+            ['Mean Displacement', mean_disp_str, 'μm'],
+            ['Mean Path Length', mean_path_str, 'μm']
+        ]
+        tracking_style_commands = style_commands.copy()
+        tracking_style_commands[0] = ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#0078D4'))
+        story.append(
+            Table(tracking_table_data, colWidths=[2.5 * inch, 1.5 * inch, 1 * inch], style=tracking_style_commands))
+
+    story.append(PageBreak())
+    story.append(Paragraph('Analysis Plot', h3_style))
+    if result.get('plot_path') and os.path.exists(result['plot_path']):
+        try:
+            with open(result['plot_path'], 'rb') as pf:
+                plot_data = pf.read()
+            plot_img = RLImage(io.BytesIO(plot_data), width=6 * inch, height=4.5 * inch)
+            plot_img.hAlign = 'CENTER'
+            story.append(plot_img)
+        except Exception as e:
+            logger.warning(f"Error adding plot to PDF: {e}")
+    tracking_plot_file = data.get('trajectory_plot', data.get('trajectories_plot'))
+    if tracking_plot_file and os.path.exists(tracking_plot_file):
+        story.append(Spacer(1, 0.2 * inch))
+        story.append(Paragraph('Cell Trajectories', h3_style))
+        try:
+            with open(tracking_plot_file, 'rb') as f:
+                traj_data = f.read()
+            traj_img = RLImage(io.BytesIO(traj_data), width=6 * inch, height=4.5 * inch)
+            traj_img.hAlign = 'CENTER'
+            story.append(traj_img)
+        except Exception as e:
+            logger.warning(f"Error adding trajectory plot to PDF: {e}")
+
+    doc.build(story)
+    pdf_buffer.seek(0)
+    return send_file(pdf_buffer, mimetype='application/pdf', download_name=f'{exp_name}_report.pdf', as_attachment=True)
+
+
 if __name__ == '__main__':
-    print("Starting Live Analysis Server...")
-    print("=" * 70)
-    print("Open: http://localhost:8080")
-    print("=" * 70)
-    app.run(debug=False, host='0.0.0.0', port=8080)
+    database.create_table()
+
+    logger.info("\n" + "=" * 70)
+    logger.info("🔬 WOUNDTRACK AI ANALYSIS SERVER (V4 - AUTO-SEGMENT)")
+    logger.info("=" * 70)
+    logger.info("✅ Refactored with templates, config, and robust error handling.")
+    logger.info("✅ Running on: http://localhost:8080")
+    logger.info("=" * 70 + "\n")
+    app.run(debug=True, host='0.0.0.0', port=8080, threaded=True)

@@ -1,0 +1,36 @@
+
+vf# Core Web Framework - Updated for Python 3.12
+Flask>=3.0.0
+Flask-CORS>=4.0.0
+Werkzeug>=3.0.0
+
+# Image Processing - Latest compatible versions
+opencv-python>=4.8.0
+scikit-image>=0.22.0
+Pillow>=10.0.0
+imageio>=2.31.0
+
+# Data Analysis - Python 3.12 compatible
+numpy>=1.26.0
+pandas>=2.1.0
+scipy>=1.11.0
+
+# Visualization
+matplotlib>=3.8.0
+seaborn>=0.13.0
+
+# Cell Tracking
+trackpy>=0.6.1
+pims>=0.6.1
+
+# Progress Bars
+tqdm>=4.66.0
+
+# Additional Utilities
+python-dotenv>=1.0.0
+
+# Optional: For PDF report generation
+reportlab>=4.0.0
+
+# Optional: For video processing
+imageio-ffmpeg>=0.4.9
