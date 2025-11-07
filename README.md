@@ -17,17 +17,17 @@ The app is a complete, end-to-end solution: upload your time-lapse images, and g
 
 <p align="center">
   <strong>Results Dashboard with Analysis Cards</strong><br>
-  <img src="https://placehold.co/800x450/2d3748/e2e8f0?text=Figure+2:+Results+Dashboard" alt="WoundTrack AI Results">
+  <img src=456.jpeg alt="WoundTrack AI Results">
 </p>
 
 <p align="center">
   <strong>"View Details" Modal with Interactive Plot & Segmentation Video</strong><br>
-  <img src="https://placehold.co/800x450/2d3748/e2e8f0?text=Figure+3:+Details+Modal" alt="WoundTrack AI Modal">
+  <img src=789.jpeg alt="WoundTrack AI Modal">
 </p>
 
 <p align="center">
   <strong>"Statistics" Tab with Aggregate Box Plots & Correlation Heatmap</strong><br>
-  <img src="https://placehold.co/800x450/2d3748/e2e8f0?text=Figure+4:+Statistics+Tab" alt="WoundTrack AI Statistics">
+  <img src=101.jpeg alt="WoundTrack AI Statistics">
 </p>
 
 ---
@@ -81,4 +81,5 @@ The app is a complete, end-to-end solution: upload your time-lapse images, and g
 ---
 
 https://xmananrastogi-woundtrack-ai.hf.space/
+
 
