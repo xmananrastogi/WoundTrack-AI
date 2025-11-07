@@ -12,7 +12,7 @@ The app is a complete, end-to-end solution: upload your time-lapse images, and g
 
 <p align="center">
   <strong>Main Dashboard & Analysis Page</strong><br>
-  <img src="https://placehold.co/800x450/2d3748/e2e8f0?text=Figure+1:+Main+Dashboard" alt="WoundTrack AI Dashboard">
+  <img src=123.jpeg alt="WoundTrack AI Dashboard">
 </p>
 
 <p align="center">
@@ -81,3 +81,4 @@ The app is a complete, end-to-end solution: upload your time-lapse images, and g
 ---
 
 https://xmananrastogi-woundtrack-ai.hf.space/
+
