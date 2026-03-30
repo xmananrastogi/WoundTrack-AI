@@ -24,13 +24,16 @@ RUN pip install --no-cache-dir \
     pandas scipy matplotlib seaborn plotly Pillow numba \
     scikit-image trackpy pytesseract python-dotenv gunicorn
 
-# Initialize directories
-RUN mkdir -p uploads results_data
+# Initialize directories and set ownership for Hugging Face (UID 1000)
+RUN mkdir -p uploads results_data && chmod -R 777 uploads results_data
 
 # Production Environment
 ENV FLASK_APP=app.py
 ENV FLASK_ENV=production
-ENV PORT=8080
+ENV PORT=7860
+
+# Port 7860 is required by Hugging Face Spaces
+EXPOSE 7860
 
 # Run with Gunicorn (4 workers, 1 thread each for safety with OpenCV)
-CMD ["gunicorn", "--bind", "0.0.0.0:8080", "--workers", "4", "--threads", "1", "app:app"]
+CMD ["gunicorn", "--bind", "0.0.0.0:7860", "--workers", "4", "--threads", "1", "app:app"]

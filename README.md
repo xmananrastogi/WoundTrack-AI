@@ -1,86 +1,33 @@
-# WoundTrack AI 🔬
-
-**A full-stack web platform for quantitative, multi-scale analysis of *in-vitro* wound healing (scratch) assays.**
-
-This project moves beyond simple area-based measurements by integrating a robust image processing backend with a multi-object cell tracker, allowing for the simultaneous analysis of both macroscopic healing kinetics and microscopic single-cell migratory behavior.
-
-The app is a complete, end-to-end solution: upload your time-lapse images, and get back a full suite of interactive plots, videos, and statistical analyses.
-
+---
+title: WoundTrack AI
+emoji: 🧬
+colorFrom: teal
+colorTo: cyan
+sdk: docker
+pinned: false
+app_port: 7860
 ---
 
-## 📸 Gallery
+# WoundTrack AI — Medical-Grade Biological Analysis
 
-<p align="center">
-  <strong>Main Dashboard & Analysis Page</strong><br>
-  <img src=123.jpeg alt="WoundTrack AI Dashboard">
-</p>
+WoundTrack AI is a high-performance clinical dashboard designed for the automated quantification of wound healing assays and cellular migration.
 
-<p align="center">
-  <strong>Results Dashboard with Analysis Cards</strong><br>
-  <img src=456.jpeg alt="WoundTrack AI Results">
-</p>
+## 🚀 Deployment (Hugging Face Spaces)
 
-<p align="center">
-  <strong>"View Details" Modal with Interactive Plot & Segmentation Video</strong><br>
-  <img src=789.jpeg alt="WoundTrack AI Modal">
-</p>
+This project is configured for one-click deployment on Hugging Face Spaces using the provided **Dockerfile**.
 
-<p align="center">
-  <strong>"Statistics" Tab with Aggregate Box Plots & Correlation Heatmap</strong><br>
-  <img src=101.jpeg alt="WoundTrack AI Statistics">
-</p>
+### 🛠️ Manual Activation Steps
 
----
+1.  **Create a New Space**: Select the **Docker** SDK.
+2.  **Add Secrets**: In the Settings tab, add the following "Variables and Secrets":
+    -   `SECRET_KEY`: (A random string for Flask session security)
+    -   `WOUNDTRACK_API_KEY`: (Your secure API key for destructive actions)
+3.  **Sync**: Connect your GitHub repository to the Space.
 
-## ✨ Core Features
-
-* **Automated Data Ingestion:** Handles `ZIP`, `TIF` (multi-page), `MP4`, `AVI`, and folders of images.
-* **Persistent Database:** Uses **SQLite** to save, browse, and manage all analysis results.
-* **Delete Functionality:** Clean up bad runs from both the database and the file system.
-
-### Macroscopic Analysis (Wound Level)
-
-* **Automated Segmentation:** Uses a **Shannon Entropy filter** (`scikit-image`) and **Otsu's Thresholding** (`opencv`) to provide an objective, bias-free segmentation of the wound area.
-* **Kinetic Calculations:** Automatically calculates:
-    * Wound Area vs. Time ($\mu m^2$)
-    * Percent Closure vs. Time
-    * Healing Rate (via Linear Regression)
-    * Healing Consistency ($R^2$)
-
-### Microscopic Analysis (Cell Level)
-
-* **Cell Tracking:** Implements **Trackpy** to track individual cells at the wound front.
-* **Advanced Metrics:** Quantifies the *mechanism* of healing by calculating:
-    * Mean Cell Velocity
-    * Migration Efficiency (Chemotaxis Index)
-    * **Mean Directionality** (cosine similarity to the wound center)
-
-### Data Visualization Platform
-
-* **Interactive Plots:** All results are plotted with **Plotly.js** for interactive viewing.
-* **Video Generation:** Creates and displays an `.mp4` video overlay of the segmentation on the original footage.
-* **Compare Tab:** Select any two (or more) experiments for a side-by-side bar chart comparison.
-* **Statistics Tab:** Automatically generates **Box Plots** (to compare distributions between conditions) and a **Correlation Heatmap** (to find relationships between metrics).
-* **Report Generation:** Download any result as a full **PDF report** or a simple **CSV** timeseries.
+### 🔬 Core Features
+- **Bio-Wound Aesthetic**: Interactive biological background with morphing cellular animations.
+- **Micro-Metric Tracking**: Automated closure wavefront, healing entropy, and phenotypic fingerprinting.
+- **Medical-Grade Security**: API Hardening, CSP headers, and protected diagnostic endpoints.
 
 ---
-
-## 🛠️ Tech Stack
-
-| Category | Technology |
-| :--- | :--- |
-| **Backend** | Python, Flask, Gunicorn |
-| **Frontend** | HTML5, CSS3, JavaScript, Plotly.js |
-| **Data Analysis** | Pandas, NumPy, SciPy |
-| **Image Processing** | OpenCV, Scikit-image, Pillow |
-| **Cell Tracking** | Trackpy, Pims |
-| **Database** | SQLite |
-| **Deployment** | Docker, Docker Compose |
-| **Reporting** | ReportLab |
-
----
-
-https://xmananrastogi-woundtrack-ai.hf.space/
-
-
-
+**Maintained by**: [Manan Rastogi](https://github.com/xmananrastogi)
