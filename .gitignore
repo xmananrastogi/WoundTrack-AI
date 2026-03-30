@@ -1,18 +1,32 @@
-# Python
-*.pyc
-__pycache__/
-venv/
-.venv/
+# WoundTrack AI — Git Ignore
+# Exclude sensitive data and transient build artifacts
 
-# Database
-db/
-*.db
-*.sqlite3
-*.db-journal
+# Environment Variables
+.env
+.flaskenv
 
-# Data & Results
+# Application Lifecycle Data
 uploads/
-results/
+results_data/
+*.db
+*.log
+logs/
 
-# OS
+# Python Cache & Build
+__pycache__/
+*.py[cod]
+*$py.class
+dist/
+build/
+*.egg-info/
+
+# Virtual Environment
+.venv/
+env/
+venv/
+
+# Editor Settings
+.idea/
+.vscode/
+*.swp
 .DS_Store

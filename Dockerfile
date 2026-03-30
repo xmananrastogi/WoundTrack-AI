@@ -1,33 +1,36 @@
-# 1. Start with a Python 3.12 base image
-FROM python:3.12-slim
+# WoundTrack AI — Production Docker Container
+# High-performance clinical analysis environment
 
-# 2. Set up the environment
-WORKDIR /app
-ENV PYTHONUNBUFFERED=1
+# Use scientific python base
+FROM python:3.11-slim
 
-# 3. Install the complex system libraries that OpenCV needs
-# This is the "magic" that Docker handles for us.
+# Set system dependencies for OpenCV & Tesseract
 RUN apt-get update && apt-get install -y \
     libgl1-mesa-glx \
     libglib2.0-0 \
-    libsm6 \
-    libxext6 \
-    libxrender-dev \
-    --no-install-recommends
-RUN rm -rf /var/lib/apt/lists/*
+    tesseract-ocr \
+    && rm -rf /var/lib/apt/lists/*
 
-# 4. Copy and install our Python requirements
-COPY requirements-py312.txt .
-RUN pip install --no-cache-dir -r requirements-py312.txt
+# Set working directory
+WORKDIR /app
 
-# 5. Copy all our application code into the container
+# Copy requirements/setup (Installing directly for speed)
+COPY setup.sh .
 COPY . .
 
-# 6. Expose the port our app will run on. Hugging Face uses 7860 by default.
-EXPOSE 7860
+# Run installation
+RUN pip install --no-cache-dir \
+    Flask Werkzeug numpy opencv-contrib-python-headless \
+    pandas scipy matplotlib seaborn plotly Pillow numba \
+    scikit-image trackpy pytesseract python-dotenv gunicorn
 
-# 7. The command to run the app using gunicorn
-# It will run 'app:app' (the 'app' object inside 'app.py')
-# It binds to port 7860, has 2 workers, and a 5-minute (300s) timeout
-# for your long-running analysis.
-CMD ["gunicorn", "--bind", "0.0.0.0:7860", "--workers", "2", "--timeout", "300", "app:app"]
+# Initialize directories
+RUN mkdir -p uploads results_data
+
+# Production Environment
+ENV FLASK_APP=app.py
+ENV FLASK_ENV=production
+ENV PORT=8080
+
+# Run with Gunicorn (4 workers, 1 thread each for safety with OpenCV)
+CMD ["gunicorn", "--bind", "0.0.0.0:8080", "--workers", "4", "--threads", "1", "app:app"]

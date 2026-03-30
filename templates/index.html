@@ -1,0 +1,1068 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>WoundTrack AI — Biological Analysis Platform</title>
+<script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Outfit:wght@400;500;600;700&family=DM+Mono:ital,wght@0,400;0,500;1,400&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/bio-style.css') }}?v=6.0">
+</head>
+<body class="bio-theme">
+    <!-- SVG Biological Noise Filters -->
+    <svg style="position: absolute; width: 0; height: 0;" aria-hidden="true">
+        <filter id="bio-noise">
+            <feTurbulence type="fractalNoise" baseFrequency="0.6" numOctaves="3" stitchTiles="stitch" />
+            <feColorMatrix type="saturate" values="0" />
+            <feComponentTransfer>
+                <feFuncR type="linear" slope="0.2" />
+                <feFuncG type="linear" slope="0.2" />
+                <feFuncB type="linear" slope="0.2" />
+            </feComponentTransfer>
+        </filter>
+        <filter id="membrane-noise">
+            <feTurbulence type="turbulence" baseFrequency="0.01" numOctaves="2" result="noise" />
+            <feDisplacementMap in="SourceGraphic" in2="noise" scale="15" />
+        </filter>
+    </svg>
+
+    <div class="bio-background">
+        <div class="background-membrane"></div>
+        <div class="wound-channel"></div>
+        <div class="wound-edge-top"></div>
+        <div class="wound-edge-bottom"></div>
+        
+        <div class="floating-cell cell-1"></div>
+        <div class="floating-cell cell-2"></div>
+        <div class="floating-cell cell-3"></div>
+        <div class="floating-cell cell-4"></div>
+        <div class="floating-cell cell-5"></div>
+        <div class="floating-cell cell-6"></div>
+        
+        <div class="micro-particles p-layer-1"></div>
+        <div class="micro-particles p-layer-2"></div>
+        <div class="micro-particles p-layer-3"></div>
+    </div>
+
+    <!-- ══ GLOBAL LOADER ═══════════════════════════════════════════════════════ -->
+    <div id="globalLoader">
+        <div class="loader-backdrop"></div>
+        <div class="loader-content">
+            <div class="loader-logo">
+                <svg viewBox="0 0 52 52" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <circle cx="26" cy="26" r="23" stroke="currentColor" stroke-width="1.5" opacity=".2"/>
+                    <circle cx="26" cy="26" r="23" stroke="currentColor" stroke-width="2" stroke-dasharray="14 8">
+                        <animateTransform attributeName="transform" type="rotate" values="0 26 26;360 26 26" dur="20s" repeatCount="indefinite"/>
+                    </circle>
+                    <path d="M26 10V42M10 26H42" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                </svg>
+            </div>
+            <div class="loader-branding">
+                <h1 class="loader-title">WoundTrack<em>AI</em></h1>
+                <div class="loader-word-container">
+                    <span id="loaderWord" class="loader-word">Initializing Platform</span>
+                </div>
+            </div>
+            <div class="loader-progress-wrap">
+                <div class="loader-progress-bar">
+                    <div id="loaderProgress" class="loader-progress-fill"></div>
+                </div>
+                <div class="loader-status">
+                    <span id="loaderStatusPercent">0%</span>
+                    <span id="loaderStatusText">Clinical Grade Analytics</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        (function() {
+            const words = [
+                "Initializing Platform",
+                "Analyzing Cellular Matrix",
+                "Detecting Wound Edges",
+                "Sequencing Biomaterials",
+                "Calibrating Neural Nets",
+                "Simulating Migration",
+                "Generating Diagnostics",
+                "System Online"
+            ];
+            
+            const wordEl = document.getElementById('loaderWord');
+            const progressEl = document.getElementById('loaderProgress');
+            const percentEl = document.getElementById('loaderStatusPercent');
+            const loader = document.getElementById('globalLoader');
+            
+            let currentWord = 0;
+            let progress = 0;
+            
+            // Faster word transitions (~0.9s per word)
+            const wordInterval = setInterval(() => {
+                if (currentWord < words.length - 1) {
+                    currentWord++;
+                    wordEl.style.opacity = '0';
+                    wordEl.style.transform = 'translateY(10px)';
+                    
+                    setTimeout(() => {
+                        wordEl.textContent = words[currentWord];
+                        wordEl.style.opacity = '1';
+                        wordEl.style.transform = 'translateY(0)';
+                    }, 400);
+                }
+            }, 900);
+
+            // Faster progress bar (takes approx 6-7 seconds)
+            const progressInterval = setInterval(() => {
+                if (progress < 100) {
+                    // Constant pace targeting ~6.5 seconds
+                    const increment = Math.random() * 1.5 + 1.0;
+                    progress += increment;
+                    if (progress > 100) progress = 100;
+                    progressEl.style.width = progress + '%';
+                    percentEl.textContent = Math.round(progress) + '%';
+                } else {
+                    clearInterval(progressInterval);
+                    clearInterval(wordInterval);
+                    
+                    setTimeout(() => {
+                        loader.style.opacity = '0';
+                        loader.style.pointerEvents = 'none';
+                        setTimeout(() => loader.remove(), 1000); // Smoother exit
+                    }, 500);
+                }
+            }, 100);
+        })();
+    </script>
+<div class="app-layout">
+
+<!-- ══ SIDEBAR ══════════════════════════════════════════════════════════════ -->
+<aside class="sidebar">
+  <div class="brand-zone">
+    <div class="logo-wrap">
+      <svg viewBox="0 0 52 52" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <circle cx="26" cy="26" r="23" stroke="#2dd4bf" stroke-width="1.5" opacity=".35"/>
+        <circle cx="26" cy="26" r="23" stroke="#34d399" stroke-width="1.2" stroke-dasharray="14 8" opacity=".6">
+          <animateTransform attributeName="transform" type="rotate" values="0 26 26;360 26 26" dur="25s" repeatCount="indefinite"/>
+        </circle>
+      </svg>
+    </div>
+    <div class="brand-block">
+      <div class="brand-name">WoundTrack<em>AI</em></div>
+      <div class="brand-tagline">Biological Platform</div>
+    </div>
+  </div>
+
+  <nav class="side-nav">
+    <button class="s-tab active" onclick="switchTab(event,'upload')">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><line x1="9" y1="3" x2="9" y2="21"></line></svg>
+      Protocol
+    </button>
+    <button class="s-tab" onclick="switchTab(event,'results')">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>
+      Inventory
+    </button>
+    <button class="s-tab" onclick="switchTab(event,'stats')">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 20V10"></path><path d="M12 20V4"></path><path d="M6 20v-6"></path></svg>
+      Analytics
+    </button>
+    <button class="s-tab" onclick="switchTab(event,'scaffold')">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 2 7 12 12 22 7 12 2"></polygon><polyline points="2 17 12 22 22 17"></polyline><polyline points="2 12 12 17 22 12"></polyline></svg>
+      Simulation
+    </button>
+    <button class="s-tab" onclick="switchTab(event,'compare')">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 3v18"></path><polyline points="15 6 18 3 21 6"></polyline><path d="M6 21V3"></path><polyline points="3 18 6 21 9 18"></polyline></svg>
+      Comparison
+    </button>
+  </nav>
+
+  <div class="sidebar-status">
+    <div class="pulse-dot"></div>
+    <span class="status-text">SYSTEM ONLINE</span>
+  </div>
+</aside>
+
+<!-- ══ MAIN CANVAS ══════════════════════════════════════════════════════════ -->
+<main class="main-canvas">
+
+<!-- ══ KPI STRIP ═══════════════════════════════════════════════════════════ -->
+<section class="kpi-strip">
+  <div class="kpi-tile">
+    <div class="kpi-number">{{ total_exp | default(0) }}</div>
+    <div class="kpi-label">Experiments</div>
+  </div>
+  <div class="kpi-tile">
+    <div class="kpi-number highlight">{{ total_cond | default(0) }}</div>
+    <div class="kpi-label">Conditions</div>
+  </div>
+  <div class="kpi-tile">
+    <div class="kpi-number">{{ total_frames | default(0) }}</div>
+    <div class="kpi-label">Frames Analysed</div>
+  </div>
+  <div class="kpi-tile">
+    <div class="kpi-number amber" style="font-size:2rem">{{ "%.1f"|format(total_time | default(0)) }} min</div>
+    <div class="kpi-label">Compute Time</div>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════════════════════════════════════
+     TAB 1: INPUT
+════════════════════════════════════════════════════════════════════════════ -->
+<div id="upload" class="tab-pane active">
+  <div class="panel">
+    <div class="panel-head">
+      <div class="panel-title">Analysis Parameters</div>
+      <div class="panel-sub">// scratch assay pipeline configuration</div>
+    </div>
+    <div class="panel-body">
+      <div style="max-width:700px;margin:0 auto">
+        <div class="field">
+          <label for="sampleId" class="field-label">Sample / Experiment ID</label>
+          <input class="field-input" type="text" id="sampleId" placeholder="e.g. HeLa-Collagen-Replicate-A01">
+        </div>
+
+        <label for="fileUpload">
+          <div class="upload-zone" id="dropZone">
+            <div class="upload-primary">Drop microscopy data here</div>
+            <div class="upload-hint">TIFF stack · AVI · MP4 · ZIP of frames</div>
+            <div class="upload-filename" id="fileName"></div>
+          </div>
+        </label>
+        <input type="file" id="fileUpload" onchange="onFileSelected()">
+
+        <div class="grid-4" style="margin-bottom:4px">
+          <div class="field">
+            <label for="diskSize" class="field-label">Filter Radius (px)</label>
+            <select class="field-input" id="diskSize">
+              <option value="0">AUTO</option>
+              <option value="15">15 — Medium</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="timeInterval" class="field-label">Δt (hr/frame)</label>
+            <input class="field-input" type="number" id="timeInterval" value="0.25">
+          </div>
+          <div class="field">
+            <label for="pixelScale" class="field-label">Scale (µm/px)</label>
+            <input class="field-input" type="number" id="pixelScale" value="1.0">
+          </div>
+          <div class="field">
+            <label for="frameInterval" class="field-label">Frame Sub-sample</label>
+            <input class="field-input" type="number" id="frameInterval" value="5" min="1">
+          </div>
+        </div>
+
+        <button class="btn btn-sm btn-ghost" onclick="autoDetectScale()" style="margin-bottom:16px" id="scaleDetectBtn">
+          🔍 Auto-detect scale bar
+        </button>
+
+        <div style="border:1px solid rgba(26,188,156,0.2);padding:16px;margin:18px 0;background:rgba(26,188,156,0.02);position:relative;">
+          <div style="position:absolute;top:-11px;left:16px;background:var(--bg2);padding:0 10px;font-family:var(--mono);font-size:.65rem;color:var(--bio-teal);letter-spacing:2px;text-transform:uppercase;">🧬 Material Identity</div>
+          <div class="grid-2">
+            <div class="field">
+              <label for="substrateMaterial" class="field-label">Substrate Material</label>
+              <select class="field-input" id="substrateMaterial" onchange="fetchPubChemData(this.value)">
+                <option value="">— Select Material —</option>
+                <option value="Stainless Steel 316L">Stainless Steel 316L</option>
+                <option value="Alumina Ceramic">Alumina Ceramic</option>
+                <option value="PEGDA">PEGDA</option>
+                <option value="PHEMA Hydrogel">PHEMA Hydrogel</option>
+                <option value="Alginate">Alginate</option>
+                <option value="Collagen I">Collagen I</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="substrateStiffness" class="field-label">Stiffness (kPa)</label>
+              <input class="field-input" type="number" id="substrateStiffness" placeholder="e.g. 5.0" step="0.1" min="0">
+            </div>
+          </div>
+          <div class="field">
+            <label for="treatment" class="field-label">Treatment</label>
+            <input class="field-input" type="text" id="treatment" placeholder="e.g. TGF-β">
+          </div>
+
+          <!-- PUBCHEM PANEL -->
+          <div id="pubchemPanel" class="pubchem-panel">
+            <div class="pubchem-header">
+              <span>// PubChem REST API LINK</span>
+              <span style="color:var(--text-mute)">LIVE SYNC</span>
+            </div>
+            <div id="pubchemContent" class="pubchem-loader">Awaiting selection...</div>
+          </div>
+        </div>
+
+        <button class="btn btn-primary" id="analyzeBtn" onclick="startUpload()">
+          <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
+          <span>Initialise Diagnostic Pipeline</span>
+        </button>
+
+        <!-- Acquisition panel -->
+        <div class="acq-panel" id="acqPanel">
+          <div class="acq-bar">
+            <div class="acq-bar-left">
+              <div class="rec-light"></div>
+              <span>ACQUISITION ACTIVE</span>
+            </div>
+            <span style="font-family:var(--mono);font-size:.68rem;color:var(--text-mute)" id="acqTimestamp">00:00:00</span>
+          </div>
+          <div class="acq-scope">
+            <div class="scope-grid"></div>
+            <div class="acq-waveform"><canvas id="waveCanvas" height="120"></canvas></div>
+            <div class="acq-scanbeam"></div>
+          </div>
+          <div class="acq-body">
+            <div class="acq-progress-track">
+              <div class="acq-progress-fill" id="acqFill"></div>
+            </div>
+            <div class="acq-status" id="acqStatus">SYSTEM STANDBY</div>
+            <div class="acq-meta">
+              <span>FRAMES: <span id="acqFrames">—</span></span>
+              <span>PROGRESS: <span id="acqPct">0%</span></span>
+              <span>ENGINE: <span id="acqMode">SCRATCH_ASSAY_V4</span></span>
+              <span>RAM: <span id="acqRam">—</span></span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════════════════
+     TAB 2: RESULTS
+════════════════════════════════════════════════════════════════════════════ -->
+<div id="results" class="tab-pane">
+  <div class="panel">
+    <div class="panel-head">
+      <div class="panel-title">Experiment Log</div>
+      <div class="panel-sub">// analysed datasets</div>
+    </div>
+    <div class="panel-body">
+      <div class="filter-row">
+        <button class="filter-pill active" onclick="filterCards(event,'all')">All</button>
+        <button class="filter-pill" onclick="filterCards(event,'Uploaded Data')">Local</button>
+        {% if all_conditions %}
+          {% for cond in all_conditions %}
+          <button class="filter-pill" onclick="filterCards(event,'{{ cond }}')">{{ cond.split('_')[0] }}</button>
+          {% endfor %}
+        {% endif %}
+      </div>
+
+      <div class="exp-grid" id="expGrid">
+        {% if not results %}
+        <p style="color:var(--text-mute);font-family:var(--mono);padding:40px;text-align:center;">No datasets found.</p>
+        {% else %}
+        {% for result in results %}
+        {% set data = result.data %}
+        <div class="exp-card" data-condition="{{ result.condition }}" data-exp-id="{{ result.id }}">
+          <div class="card-header">
+            <div class="card-name">{{ result.experiment_name }}</div>
+            <span class="card-badge">{{ result.condition_name }}</span>
+          </div>
+
+          <div class="overlay-controls" data-card-id="{{ result.id }}">
+            <button class="ov-btn active" onclick="setOverlay(this,'raw','{{ result.id }}')">Raw</button>
+            <button class="ov-btn" onclick="setOverlay(this,'heatmap','{{ result.id }}')">Heatmap</button>
+            <button class="ov-btn" onclick="setOverlay(this,'mask','{{ result.id }}')">Mask</button>
+            <div style="flex:1"></div>
+            <button class="ov-btn" onclick="openPlayer('{{ result.id }}')">
+              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;margin-right:2px"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
+              Replay
+            </button>
+          </div>
+
+          <div class="img-viewer" id="viewer-{{ result.id }}">
+            {% if result.plot_url %}
+            <img src="{{ result.plot_url }}" id="img-raw-{{ result.id }}" alt="Analysis">
+            {% else %}
+            <span style="color:var(--text-mute);font-family:var(--mono);font-size:.78rem">No visualisation</span>
+            {% endif %}
+            <div class="img-overlay-label" id="overlay-label-{{ result.id }}">Raw · Analysis</div>
+          </div>
+
+          <div class="card-metrics">
+            <div class="card-metric">
+              <span class="cm-label">Closure</span>
+              <span class="cm-val">{{ "%.1f"|format(data.get('final_closure_pct', 0)) }}%</span>
+            </div>
+            <div class="card-metric">
+              <span class="cm-label">Rate µm²/hr</span>
+              <span class="cm-val">{{ "%.0f"|format(data.get('healing_rate_um2_per_hr',0)|abs) }}</span>
+            </div>
+            <div class="card-metric">
+              <span class="cm-label">R²</span>
+              <span class="cm-val">{{ "%.3f"|format(data.get('r_squared', 0)) }}</span>
+            </div>
+          </div>
+
+          <div class="card-actions">
+            <button class="ca-btn primary" onclick="openModal('{{ result.id }}')">
+              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"></path><rect x="8" y="2" width="8" height="4" rx="1" ry="1"></rect></svg>
+              Data
+            </button>
+            <button class="ca-btn ai-btn" onclick="openAIPanel('{{ result.id }}')">
+              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 8V4H8"></path><rect x="4" y="8" width="16" height="12" rx="2"></rect><path d="M2 14h2"></path><path d="M20 14h2"></path><path d="M15 13v2"></path><path d="M9 13v2"></path></svg>
+              AI
+            </button>
+            <button class="ca-btn" onclick="downloadCSV('{{ result.id }}')">CSV</button>
+            <a class="ca-btn" href="/download-fiji/{{ result.id }}" title="FIJI format">FIJI</a>
+            <a class="ca-btn" href="/download-pdf/{{ result.id }}" target="_blank">PDF</a>
+            <button class="ca-btn" onclick="openPubModal('{{ result.id }}')">Pub</button>
+            <button class="ca-btn danger" onclick="deleteExp(event,'{{ result.id }}','{{ result.experiment_name }}')">
+              <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+            </button>
+          </div>
+        </div>
+        {% endfor %}
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════════════════
+     TAB 3: METRICS
+════════════════════════════════════════════════════════════════════════════ -->
+<div id="stats" class="tab-pane">
+  <div class="panel">
+    <div class="panel-head">
+      <div class="panel-title">Population Statistics</div>
+      <div class="panel-sub">// aggregated analysis</div>
+    </div>
+    <div class="panel-body">
+      {% if cond_stats %}
+      <div class="cond-grid">
+      {% for cond, d in cond_stats.items()|sort %}
+      {% set cn = condition_names.get(cond, [cond])[0] %}
+        <div class="cond-tile">
+          <h3>{{ cn }} <span style="font-size:.8rem;font-style:normal;color:var(--text-mute)">[N={{ d.get('n',0) }}]</span></h3>
+          <div class="cond-row">
+            <span>Final closure</span>
+            <span class="v1">{{ "%.1f"|format(d.get('closure_mean',0)) }}% ± {{ "%.1f"|format(d.get('closure_std',0)) }}</span>
+          </div>
+          <div class="cond-row">
+            <span>Healing speed</span>
+            <span class="v2">{{ "%.0f"|format(d.get('healing_mean',0)|abs) }} µm²/hr</span>
+          </div>
+        </div>
+      {% endfor %}
+      </div>
+      {% endif %}
+
+      <div class="plot-box">
+        <div class="plot-box-title">Durotaxis — substrate stiffness vs healing rate</div>
+        <div id="stiffness-scatter" style="min-height:350px"></div>
+      </div>
+      <div class="plot-box">
+        <div class="plot-box-title">Metric distributions by condition</div>
+        <div id="box-plots" style="min-height:350px"></div>
+      </div>
+      <div class="plot-box">
+        <div class="plot-box-title">Correlation matrix</div>
+        <div id="corr-heatmap" style="min-height:480px"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════════════════
+     TAB 4: IN SILICO SCAFFOLD DESIGNER
+════════════════════════════════════════════════════════════════════════════ -->
+<div id="scaffold" class="tab-pane">
+  <div class="panel">
+    <div class="panel-head">
+      <div class="panel-title">In Silico Scaffold Simulation Engine</div>
+      <div class="panel-sub">// computationally predict cellular mechanobiology and host response</div>
+    </div>
+    <div class="panel-body">
+      <p style="font-family:var(--body);font-style:italic;color:var(--text-dim);font-size:.9rem;margin-bottom:24px;">
+        Digitally simulate mechanobiological interactions (e.g. durotactic edge traction mechanisms) and predict temporal inflammatory cascades prior to physical biomaterial prototyping.
+      </p>
+      <div class="scaffold-layout">
+
+        <!-- LEFT: inputs -->
+        <div class="scaffold-inputs">
+          <label class="field-label">Select Substrate Material</label>
+          <div class="mat-grid" id="materialCards"></div>
+
+          <div class="field">
+            <label class="field-label">Target Stiffness (kPa)</label>
+            <input class="field-input" type="range" id="sdStiffness" min="-1" max="4" step="0.05" value="0" oninput="updateStiffnessDisplay(this)">
+            <div style="display:flex;justify-content:space-between;margin-top:6px">
+              <span style="font-family:var(--mono);font-size:.8rem;color:var(--bio-teal)" id="sdStiffnessVal">1.0 kPa</span>
+              <span style="font-family:var(--mono);font-size:.68rem;color:var(--text-mute)" id="sdStiffnessRegion"></span>
+            </div>
+            <div class="stiff-rule"><div class="stiff-pointer" id="stiffnessPointer"></div></div>
+            <div class="stiff-ticks"><span>0.1</span><span>1</span><span>10</span><span>100</span><span>1k</span><span>10k kPa</span></div>
+          </div>
+
+          <div class="field">
+            <label class="field-label">Crosslink Density (0–1)</label>
+            <input class="field-input" type="range" id="sdCrosslink" min="0" max="1" step="0.05" value="0.5">
+            <div style="display:flex;justify-content:space-between;font-family:var(--mono);font-size:.6rem;color:var(--text-mute);margin-top:4px">
+              <span>Soft · porous</span><span>Stiff · dense</span>
+            </div>
+          </div>
+
+          <div class="field">
+            <label class="field-label">Cell Type</label>
+            <select class="field-input" id="sdCellType">
+              <option value="epithelial">Epithelial (MDCK)</option>
+              <option value="fibroblast">Fibroblast</option>
+              <option value="cancer">Cancer (invasive)</option>
+            </select>
+          </div>
+
+          <button class="btn btn-primary" onclick="runScaffoldDesign()" id="sdBtn" style="margin-top:10px">
+            <span>⚡ Run Prediction</span>
+          </button>
+        </div>
+
+        <!-- RIGHT: results -->
+        <div class="scaffold-result" id="sdResult">
+          <div style="font-family:var(--display);font-style:italic;color:var(--text-mute);font-size:1rem;text-align:center;padding:50px 0" id="sdPlaceholder">
+            ← Configure parameters and click Run Prediction
+          </div>
+          <div id="sdResultContent" style="display:none; width: 100%;">
+
+            <div class="mat-preview" id="sdMatPreview">—</div>
+
+            <div class="scaffold-kpis">
+              <div class="s-kpi"><div class="s-kpi-val" id="sdRate">—</div><div class="s-kpi-label">Healing Rate µm²/hr</div></div>
+              <div class="s-kpi"><div class="s-kpi-val" id="sdVel">—</div><div class="s-kpi-label">Cell Velocity µm/min</div></div>
+              <div class="s-kpi"><div class="s-kpi-val" id="sdClosure24">—</div><div class="s-kpi-label">24h Closure %</div></div>
+            </div>
+
+            <div>
+              <div style="font-family:var(--mono);font-size:.65rem;color:var(--text-mute);margin-bottom:6px">Migration Efficiency</div>
+              <div class="eff-gauge"><div class="eff-gauge-fill" id="sdGaugeFill"></div></div>
+              <div style="display:flex;justify-content:space-between;font-family:var(--mono);font-size:.58rem;color:var(--text-mute);margin-top:3px">
+                <span>Poor</span><span>Optimal</span><span>Suppressed</span>
+              </div>
+            </div>
+
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-family:var(--mono);font-size:.75rem">
+              <div style="color:var(--text-mute)">Effective Porosity</div><div style="color:var(--bio-amber);text-align:right" id="sdPorosity">—</div>
+              <div style="color:var(--text-mute)">Degradation</div><div style="color:var(--bio-amber);text-align:right" id="sdDeg">—</div>
+              <div style="color:var(--text-mute)">Cell Adhesion</div><div style="color:var(--bio-amber);text-align:right" id="sdAdh">—</div>
+              <div style="color:var(--text-mute)">Common Use</div><div style="color:var(--bio-amber);text-align:right;font-size:.68rem" id="sdUse">—</div>
+            </div>
+
+            <div class="scaffold-note amber" id="sdRegime">—</div>
+            <div class="scaffold-note green" id="sdRec">—</div>
+
+            <hr style="border:0;border-top:1px solid rgba(255,255,255,0.05);margin:10px 0;">
+
+            <div class="plot-box" style="margin-top:0; padding:0; background:transparent; border:none;">
+              <div class="plot-box-title">// Durotaxis & Edge Traction Force Maps</div>
+              <div id="durotaxis-plot" style="min-height:300px; width:100%;"></div>
+            </div>
+
+            <div class="plot-box" style="margin-top:10px; padding:0; background:transparent; border:none;">
+              <div class="plot-box-title">// 21-Day Inflammatory Timeline Simulation</div>
+              <div id="immune-plot" style="min-height:300px; width:100%;"></div>
+            </div>
+
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════════════════
+     TAB 5: COMPARE
+════════════════════════════════════════════════════════════════════════════ -->
+<div id="compare" class="tab-pane">
+  <div class="panel">
+    <div class="panel-head">
+      <div class="panel-title">Metric Comparison</div>
+      <div class="panel-sub">// cross-experiment analysis</div>
+    </div>
+    <div class="panel-body">
+      <div id="compareLoader" style="color:var(--bio-teal);font-family:var(--mono);">Loading datasets…</div>
+      <div id="compareContent" class="compare-layout" style="display:none;">
+        <div class="compare-list" id="compareList"><h4>Available Datasets</h4></div>
+        <div>
+          <div class="field">
+            <label class="field-label">Target Metric</label>
+            <select class="field-input" id="metricSelect" style="max-width:300px"></select>
+          </div>
+          <button class="btn btn-primary" onclick="renderComparePlot()" style="width:auto;margin-bottom:16px">
+            <span>Render Chart</span>
+          </button>
+          <div id="compare-plot" style="min-height:360px"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+</main>
+</div><!-- /app-layout -->
+
+<!-- ══ MAIN DATA MODAL ══════════════════════════════════════════════════════ -->
+<div class="modal-bg" id="mainModal" onclick="closeModal()">
+  <div class="modal" onclick="event.stopPropagation()">
+    <div class="modal-header">
+      <div class="modal-title" id="modalTitle">Experiment Data</div>
+      <div class="modal-header-right">
+        <button class="btn btn-sm btn-ghost" id="modalFijiBtn" style="display:none" onclick="downloadFijiFromModal()">FIJI CSV</button>
+        <button class="btn btn-sm btn-ghost" id="modalCIBtn" style="display:none" onclick="loadSigmoidCI()">95% CI Band</button>
+        <button class="modal-close-btn" onclick="closeModal()">✕ Close</button>
+      </div>
+    </div>
+    <div class="modal-body">
+      <div class="modal-left">
+        <div class="modal-section">
+          <div class="modal-section-title">Kinetics Plot</div>
+          <div id="modalPlot" style="min-height:340px"></div>
+        </div>
+        <div class="modal-section">
+          <div class="modal-section-title">Wound Closure Replay</div>
+          <div class="cv-player" id="modalPlayerWrap" style="display:none">
+            <canvas id="modalCanvas"></canvas>
+            <div class="cv-controls">
+              <button class="cv-btn" id="playPauseBtn" onclick="togglePlay()">▶</button>
+              <input type="range" class="cv-scrubber" id="playerScrubber" min="0" max="100" value="0" oninput="scrubTo(this.value)">
+              <span style="font-family:var(--mono);font-size:.7rem;color:var(--bio-teal)" id="frameCounter">0/0</span>
+              <select class="field-input cv-fps" id="fpsSelect" style="width:80px;padding:4px 8px;font-size:.68rem" onchange="setFPS(this.value)">
+                <option value="4">4 fps</option>
+                <option value="8" selected>8 fps</option>
+                <option value="15">15 fps</option>
+                <option value="24">24 fps</option>
+              </select>
+            </div>
+          </div>
+          <div id="noPlayerMsg" style="color:var(--text-mute);font-family:var(--mono);font-size:.75rem;padding:20px;text-align:center">No gallery frames available</div>
+        </div>
+        <div class="modal-section">
+          <div class="modal-section-title">Cell Trajectories</div>
+          <div id="modalRose" style="min-height:180px;display:flex;align-items:center;justify-content:center">
+            <span style="color:var(--text-mute);font-family:var(--mono);font-size:.75rem">No trajectory data</span>
+          </div>
+        </div>
+      </div>
+      <div class="modal-right">
+        <div class="modal-section">
+          <div class="modal-section-title">Quantitative Metrics</div>
+          <table class="m-table" id="modalMetrics"></table>
+        </div>
+        <div class="modal-section" id="labInsightBox" style="display:none">
+          <div class="modal-section-title">// AI Laboratory Observation</div>
+          <div class="scaffold-note green" id="labInsightText" style="font-style:italic; border-left-width:4px; padding:12px; font-size:.85rem">
+            Analyzing biological patterns...
+          </div>
+        </div>
+
+        <div class="modal-section">
+          <div class="modal-section-title">Frame Gallery</div>
+          <div class="gallery-thumbs" id="modalGallery"></div>
+        </div>
+        <div class="modal-section">
+          <div class="modal-section-title">Before / After</div>
+          <p style="font-family:var(--mono);font-size:.65rem;color:var(--text-mute);margin-bottom:8px">Drag to compare first vs last frame</p>
+          <div class="slide-compare" id="slideCompare">
+            <div class="slide-left" id="slideLeft"></div>
+            <div class="slide-right" id="slideRight"></div>
+            <div class="slide-handle"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══ AI ANALYSIS MODAL ════════════════════════════════════════════════════ -->
+<div class="modal-bg" id="aiModal" onclick="closeAIModal()">
+  <div class="modal" style="max-width:820px;height:88vh" onclick="event.stopPropagation()">
+    <div class="modal-header">
+      <div class="modal-title" id="aiModalTitle">🤖 AI Wound Interpreter</div>
+      <button class="modal-close-btn" onclick="closeAIModal()">✕</button>
+    </div>
+    <div class="ai-tab-bar">
+      <button class="ai-tab active" onclick="switchAITab(this,'interpret')">Biological Interpret</button>
+      <button class="ai-tab" onclick="switchAITab(this,'anomaly')">QC &amp; Anomaly Check</button>
+      <button class="ai-tab" onclick="switchAITab(this,'predict')">Predictive Forecast</button>
+      <button class="ai-tab" onclick="switchAITab(this,'score')">WoundTrack Score™</button>
+      <button class="ai-tab novel-tab" onclick="switchAITab(this,'novel')">🧬 Novel Metrics</button>
+    </div>
+    <div class="ai-body">
+      <!-- Interpret / Anomaly / Predict panes -->
+      <div id="ai-pane-interpret">
+        <div class="ai-action-row">
+          <button class="ai-run-btn" id="aiRunBtn" onclick="runAI('interpret')">▶ Run AI Interpretation</button>
+          <span style="font-family:var(--mono);font-size:.65rem;color:var(--text-mute);align-self:center">
+            Powered by Claude · ~5–10s
+          </span>
+        </div>
+        <div class="ai-output" id="ai-out-interpret">Click "Run AI Interpretation" to get an expert biological analysis of this experiment's metrics.</div>
+      </div>
+      <div id="ai-pane-anomaly" style="display:none">
+        <div class="ai-action-row">
+          <button class="ai-run-btn" onclick="runAI('anomaly')">▶ Run QC Check</button>
+        </div>
+        <div class="ai-output" id="ai-out-anomaly">Click "Run QC Check" to identify anomalies, inconsistencies, and data quality issues.</div>
+      </div>
+      <div id="ai-pane-predict" style="display:none">
+        <div class="ai-action-row">
+          <button class="ai-run-btn" onclick="runAI('predict')">▶ Run Predictive Forecast</button>
+        </div>
+        <div class="ai-output" id="ai-out-predict">Click "Run Predictive Forecast" to get AI-powered closure predictions at 48hr and 72hr.</div>
+      </div>
+      <!-- WTS Score pane -->
+      <div id="ai-pane-score" style="display:none">
+        <div class="ai-action-row">
+          <button class="ai-run-btn" onclick="computeWTS()">▶ Compute WoundTrack Score™</button>
+          <span style="font-family:var(--mono);font-size:.65rem;color:var(--text-mute);align-self:center">
+            Novel composite quality index (0–100)
+          </span>
+        </div>
+        <div class="wts-card" id="wtsCard" style="display:none">
+          <div style="display:flex;align-items:baseline;gap:12px">
+            <div class="wts-total" id="wtsTotal">—</div>
+            <div>
+              <div class="wts-grade" id="wtsGrade"></div>
+              <div style="font-family:var(--mono);font-size:.6rem;color:var(--text-mute);margin-top:2px">/ 100</div>
+            </div>
+          </div>
+          <div class="wts-bars">
+            <div class="wts-bar-row">
+              <span class="wts-bar-label">Kinetics</span>
+              <div class="wts-bar-track"><div class="wts-bar-fill" id="wtsBar-k" style="width:0%"></div></div>
+              <span class="wts-bar-val" id="wtsVal-k">—</span>
+            </div>
+            <div class="wts-bar-row">
+              <span class="wts-bar-label">Migration</span>
+              <div class="wts-bar-track"><div class="wts-bar-fill" id="wtsBar-m" style="width:0%"></div></div>
+              <span class="wts-bar-val" id="wtsVal-m">—</span>
+            </div>
+            <div class="wts-bar-row">
+              <span class="wts-bar-label">Morphology</span>
+              <div class="wts-bar-track"><div class="wts-bar-fill" id="wtsBar-mo" style="width:0%"></div></div>
+              <span class="wts-bar-val" id="wtsVal-mo">—</span>
+            </div>
+            <div class="wts-bar-row">
+              <span class="wts-bar-label">Confidence</span>
+              <div class="wts-bar-track"><div class="wts-bar-fill" id="wtsBar-c" style="width:0%"></div></div>
+              <span class="wts-bar-val" id="wtsVal-c">—</span>
+            </div>
+          </div>
+        </div>
+        <div class="ai-output" id="wtsInterpret" style="display:none"></div>
+        <div style="margin-top:14px;font-family:var(--mono);font-size:.62rem;color:var(--text-mute);line-height:1.7">
+          <strong style="color:var(--text-dim)">WoundTrack Score™ methodology:</strong><br>
+          Kinetics (25pt): Sigmoid R² × 15 + closure% × 0.08 − lag phase penalty<br>
+          Migration (25pt): MSD α optimality × 15 + directed migration × 6 + migration fraction × 4<br>
+          Morphology (25pt): Tortuosity improvement × 15 + (1 − asymmetry) × 10<br>
+          Confidence (25pt): Frame count × 10 + cells tracked × 8 + linear R² × 7
+        </div>
+      </div>
+
+      <!-- NOVEL METRICS PANE -->
+      <div id="ai-pane-novel" style="display:none">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px">
+
+          <!-- Wavefront Decomposition card -->
+          <div class="wts-card" style="grid-column:1/3">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+              <div style="font-family:var(--mono);font-size:.75rem;color:#9b59b6;font-weight:600">
+                〜 Closure Wavefront Decomposition
+              </div>
+              <button class="ai-run-btn" style="padding:6px 12px;font-size:.65rem" onclick="runNovel('wavefront')">▶ Analyse</button>
+            </div>
+            <div id="novel-out-wavefront" class="novel-metric-grid">
+              <div class="novel-placeholder">Treats wound closure as a damped travelling wave.<br>
+              Extracts: wave speed (µm/hr), decay constant, coherence, healing regime.</div>
+            </div>
+          </div>
+
+          <!-- Temporal Entropy card -->
+          <div class="wts-card">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+              <div style="font-family:var(--mono);font-size:.75rem;color:#1abc9c;font-weight:600">
+                ≈ Temporal Healing Entropy
+              </div>
+              <button class="ai-run-btn" style="padding:6px 12px;font-size:.65rem;background:linear-gradient(135deg,#1abc9c,#16a085)" onclick="runNovel('entropy')">▶ Compute</button>
+            </div>
+            <div id="novel-out-entropy">
+              <div class="novel-placeholder">Information-theoretic disorder<br>of closure rate distribution.</div>
+            </div>
+          </div>
+
+          <!-- Phase Classifier card -->
+          <div class="wts-card">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+              <div style="font-family:var(--mono);font-size:.75rem;color:#e67e22;font-weight:600">
+                ◈ Kinetic Phase Classifier
+              </div>
+              <button class="ai-run-btn" style="padding:6px 12px;font-size:.65rem;background:linear-gradient(135deg,#e67e22,#d35400)" onclick="runNovel('phase')">▶ Classify</button>
+            </div>
+            <div id="novel-out-phase">
+              <div class="novel-placeholder">Auto-classifies biological healing<br>phase from 4D metric fingerprint.</div>
+            </div>
+          </div>
+
+          <!-- Phenotypic Fingerprint card -->
+          <div class="wts-card" style="grid-column:1/3">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+              <div style="font-family:var(--mono);font-size:.75rem;color:#3498db;font-weight:600">
+                ⬡ Phenotypic Fingerprint Vector
+              </div>
+              <button class="ai-run-btn" style="padding:6px 12px;font-size:.65rem;background:linear-gradient(135deg,#3498db,#2980b9)" onclick="runNovel('fingerprint')">▶ Generate</button>
+            </div>
+            <div id="novel-out-fingerprint">
+              <div class="novel-placeholder">12-dimensional normalised signature.<br>Compare drug effects with cosine similarity.</div>
+            </div>
+            <canvas id="fingerprintRadar" style="display:none;margin-top:12px;max-height:220px"></canvas>
+          </div>
+        </div>
+        <div style="font-family:var(--mono);font-size:.6rem;color:var(--text-mute);line-height:1.6;border-top:1px solid rgba(255,255,255,.05);padding-top:10px">
+          <strong style="color:var(--text-dim)">Patent-pending algorithms:</strong>
+          Closure Wavefront Decomposition · Kinetic Phase Auto-Classifier ·
+          Temporal Healing Entropy · Phenotypic Fingerprint Vector
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- 🕯️ DIAGNOSTIC TICKER TAPE -->
+  <footer class="bio-ticker-wrap">
+    <div class="ticker-label">LIVE DIAGNOSTICS:</div>
+    <div class="ticker-content">
+      <div id="tickerLog" class="ticker-track">
+        <span>[SYSTEM] Initializing 4D Morphological Engine...</span>
+        <span>[ML] Loading Kinetic Phase Classifier (v2.4)...</span>
+        <span>[BIO] FITC/DAPI wavelength calibration complete.</span>
+        <span>[STATUS] All nodes active. Waiting for tissue sample input...</span>
+      </div>
+    </div>
+  </footer>
+</div>
+
+<!-- ══ PUBLICATION FIGURE MODAL ═════════════════════════════════════════════ -->
+<div class="modal-bg" id="pubModal" onclick="closePubModal()">
+  <div class="modal" style="max-width:580px;height:auto;max-height:85vh" onclick="event.stopPropagation()">
+    <div class="modal-header">
+      <div class="modal-title">Export Publication Figure</div>
+      <button class="modal-close-btn" onclick="closePubModal()">✕</button>
+    </div>
+    <div style="padding:24px;overflow-y:auto">
+      <p style="font-family:var(--body);font-style:italic;color:var(--text-dim);font-size:.85rem;margin-bottom:20px;line-height:1.6">
+        Generate a 300 DPI figure for journal submission. All axes labelled, no watermarks.
+      </p>
+      <div class="pub-grid">
+        <div class="field">
+          <label class="field-label">Width (mm)</label>
+          <input class="field-input" type="number" id="pubWidth" value="180" min="60">
+        </div>
+        <div class="field">
+          <label class="field-label">Height (mm)</label>
+          <input class="field-input" type="number" id="pubHeight" value="120" min="40">
+        </div>
+        <div class="field">
+          <label class="field-label">DPI</label>
+          <select class="field-input" id="pubDPI">
+            <option value="150">150 — Draft</option>
+            <option value="300" selected>300 — Print</option>
+            <option value="600">600 — Press</option>
+          </select>
+        </div>
+      </div>
+      <div class="field">
+        <label class="field-label">Style</label>
+        <select class="field-input" id="pubStyle">
+          <option value="nature">Nature / White</option>
+          <option value="minimal">Minimal / Seaborn</option>
+          <option value="dark">Dark Lab</option>
+        </select>
+      </div>
+      <p style="font-family:var(--mono);font-size:.65rem;color:var(--text-mute);margin-bottom:16px">
+        Single col = 90 mm · Double col = 180 mm · Full page = 210 mm
+      </p>
+      <button class="btn btn-primary" onclick="downloadPubFigure()">
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:8px"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+        <span>Generate Figure</span>
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ══ PLAYER MODAL ══════════════════════════════════════════════════════════ -->
+<div class="modal-bg" id="playerModal" onclick="closePlayerModal()">
+  <div class="modal" style="max-width:900px;height:auto;max-height:88vh" onclick="event.stopPropagation()">
+    <div class="modal-header">
+      <div class="modal-title" id="playerModalTitle">Timelapse Replay</div>
+      <button class="modal-close-btn" onclick="closePlayerModal()">✕</button>
+    </div>
+    <div style="padding:16px">
+        <div class="cv-player">
+          <canvas id="standaloneCanvas" style="width:100%;max-height:480px;display:block"></canvas>
+          <div class="cv-controls">
+            <button class="cv-btn" id="saPlayPauseBtn" onclick="saTogglePlay()">
+              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
+            </button>
+            <input type="range" class="cv-scrubber" id="saScrubber" min="0" max="100" value="0" oninput="saScrubTo(this.value)">
+          <span style="font-family:var(--mono);font-size:.7rem;color:var(--bio-teal)" id="saFrameCounter">0/0</span>
+          <select class="field-input cv-fps" style="width:80px;padding:4px 8px;font-size:.68rem" onchange="saSetFPS(this.value)">
+            <option value="4">4 fps</option>
+            <option value="8" selected>8 fps</option>
+            <option value="15">15 fps</option>
+            <option value="24">24 fps</option>
+          </select>
+        </div>
+      </div>
+      <div style="font-family:var(--mono);font-size:.65rem;color:var(--text-mute);margin-top:10px" id="saInfo"></div>
+    </div>
+  </div>
+<!-- ══ COMMAND PALETTE (CMD+K) ══════════════════════════════════════════════ -->
+<div id="commandPalette" class="palette-overlay" onclick="closePalette()">
+  <div class="palette-container" onclick="event.stopPropagation()">
+    <div class="palette-search-wrap">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+      <input type="text" id="paletteInput" placeholder="Search samples, protocols, or actions... (Cmd+K)" autofocus>
+    </div>
+    <div id="paletteResults" class="palette-results">
+      <div class="palette-group">Search Results</div>
+      <div class="palette-item" onclick="switchTab(null, 'upload')">
+        <span class="p-icon">📂</span>
+        <div class="p-text">
+          <div class="p-title">Upload Protocol</div>
+          <div class="p-sub">Initialize new tissue analysis</div>
+        </div>
+        <kbd>G U</kbd>
+      </div>
+      <div class="palette-item" onclick="switchTab(null, 'results')">
+        <span class="p-icon">⬡</span>
+        <div class="p-text">
+          <div class="p-title">View Results</div>
+          <div class="p-sub">Latest 4D Morphological data</div>
+        </div>
+        <kbd>G R</kbd>
+      </div>
+      <div class="palette-item" onclick="document.body.classList.toggle('high-contrast')">
+        <span class="p-icon">👁️</span>
+        <div class="p-text">
+          <div class="p-title">Toggle High Contrast</div>
+          <div class="p-sub">Accessibility settings</div>
+        </div>
+      </div>
+    </div>
+    <div class="palette-footer">
+      <span><kbd>↵</kbd> Select</span>
+      <span><kbd>↑↓</kbd> Navigate</span>
+      <span><kbd>esc</kbd> Close</span>
+    </div>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════════════════════════════
+     DATA PAYLOADS
+═══════════════════════════════════════════════════════════════════════════ -->
+<script type="application/json" id="metric_info_data">
+  {{ metric_info | tojson | safe }}
+</script>
+<script type="application/json" id="scaffold_db_data">
+  {{ scaffold_db | tojson | safe }}
+</script>
+<script type="application/json" id="corr_json_data">
+  {{ correlation_json | default('{"data":[]}', true) | safe }}
+</script>
+<script type="application/json" id="box_json_data">
+  {{ box_plots_json | default('{"data":[]}', true) | safe }}
+</script>
+<script type="application/json" id="stiff_json_data">
+  {{ stiffness_json | default('{"data":[]}', true) | safe }}
+</script>
+
+<!-- ════════════════════════════════════════════════════════════════════════
+     JAVASCRIPT
+═══════════════════════════════════════════════════════════════════════════ -->
+<!-- ══ BioUX INTELLIGENCE SUITE ═════════════════════════════════════════════ -->
+<script>
+const BioUX = {
+  tickerMessages: [
+    "[AI] Temporal smoothing active.",
+    "[DATA] Cosine similarity: 0.982.",
+    "[SYSTEM] Heatmap normalization complete.",
+    "[BIO] Detected high collagen density in ROI_4.",
+    "[ML] Segmentation accuracy at 99.4%.",
+    "[STATUS] Ready for export."
+  ],
+  
+  init() {
+    this.setupMagneticBackground();
+    this.setupCommandPalette();
+    this.startTicker();
+    console.log("BioUX Suite Online.");
+  },
+
+  setupMagneticBackground() {
+    window.addEventListener('mousemove', (e) => {
+      const x = (e.clientX / window.innerWidth - 0.5) * 60;
+      const y = (e.clientY / window.innerHeight - 0.5) * 60;
+      document.querySelectorAll('.floating-cell').forEach((cell, i) => {
+        // Each cell reacts differently based on index for natural feel
+        const factor = 1 + (i * 0.2);
+        cell.style.setProperty('--cursor-x', `${x * factor}px`);
+        cell.style.setProperty('--cursor-y', `${y * factor}px`);
+      });
+    });
+  },
+
+  setupCommandPalette() {
+    const palette = document.getElementById('commandPalette');
+    const input = document.getElementById('paletteInput');
+
+    window.addEventListener('keydown', (e) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+        e.preventDefault();
+        this.openPalette();
+      }
+      if (e.key === 'Escape') this.closePalette();
+    });
+
+    input.addEventListener('input', (e) => {
+      // Basic filtering logic could go here
+    });
+  },
+
+  openPalette() {
+    document.getElementById('commandPalette').classList.add('active');
+    setTimeout(() => document.getElementById('paletteInput').focus(), 100);
+  },
+
+  closePalette() {
+    document.getElementById('commandPalette').classList.remove('active');
+  },
+
+  startTicker() {
+    const track = document.getElementById('tickerLog');
+    if (!track) return;
+    
+    // Duplicate messages for seamless scrolling
+    const messages = track.innerHTML;
+    track.innerHTML = messages + messages + messages; 
+
+    setInterval(() => {
+      const msg = this.tickerMessages[Math.floor(Math.random() * this.tickerMessages.length)];
+      const span = document.createElement('span');
+      span.textContent = msg;
+      track.appendChild(span);
+      if (track.children.length > 40) track.removeChild(track.children[0]);
+    }, 3000);
+  }
+};
+
+window.closePalette = () => BioUX.closePalette();
+// Initialize after DOM is ready
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', () => BioUX.init());
+} else {
+  BioUX.init();
+}
+</script>
+
+<script src="{{ url_for('static', filename='js/main.js') }}"></script>
+</body>
+</html>
