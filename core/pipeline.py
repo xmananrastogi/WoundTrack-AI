@@ -135,7 +135,7 @@ class WoundHealingPipeline(AnalysisPipeline):
         try:
             for idx in range(n_frames):
                 img = img_queue.get()
-                if img == "STOP":
+                if isinstance(img, str) and img == "STOP":
                     break
                 
                 if img is None:
