@@ -41,6 +41,11 @@ with app.app_context():
 app.register_blueprint(api_bp, url_prefix="/api")
 app.register_blueprint(pages_bp)
 
+# Silent favicon handler to prevent 404s in logs
+@app.route('/favicon.ico')
+def favicon():
+    return '', 204
+
 # 🛡️ SECURITY HEADERS & DEPLOYMENT PROTECTION
 @app.after_request
 def add_security_headers(response):
