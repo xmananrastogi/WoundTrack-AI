@@ -22,7 +22,7 @@ COPY . .
 
 # Run installation
 RUN pip install --no-cache-dir \
-    Flask Werkzeug numpy opencv-contrib-python-headless \
+    Flask flask-cors Werkzeug numpy opencv-contrib-python-headless \
     pandas scipy matplotlib seaborn plotly Pillow numba \
     scikit-image trackpy pytesseract python-dotenv gunicorn
 
