@@ -37,5 +37,6 @@ ENV PORT=7860
 # Port 7860 is required by Hugging Face Spaces
 EXPOSE 7860
 
-# Run with Gunicorn (4 workers, 1 thread each for safety with OpenCV)
-CMD ["gunicorn", "--bind", "0.0.0.0:7860", "--workers", "4", "--threads", "1", "app:app"]
+# Run with Gunicorn (Optimized for Hugging Face Free Tier)
+# Increased timeout to 300s to support heavy scientific processing
+CMD ["gunicorn", "--bind", "0.0.0.0:7860", "--workers", "2", "--threads", "4", "--timeout", "300", "--preload", "app:app"]
